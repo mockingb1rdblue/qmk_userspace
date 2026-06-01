@@ -48,11 +48,11 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
   [2] = LAYOUT_split_3x6_3(
   //,-----------------------------------------------------.                    ,-----------------------------------------------------.
-       KC_GRV, KC_EXLM,   KC_AT, KC_HASH,  KC_DLR, KC_PERC,                     KC_CIRC, KC_AMPR, KC_ASTR, KC_LPRN, KC_RPRN, RGB_TOG,
+       KC_GRV, KC_EXLM,   KC_AT, KC_HASH,  KC_DLR, KC_PERC,                     KC_CIRC, KC_AMPR, KC_ASTR, KC_LPRN, KC_RPRN, UG_TOGG,
   //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
-      KC_TRNS,   KC_NO,   KC_NO,   KC_NO, KC_HOME, KC_PGUP,                     KC_EQL,  KC_MINS, KC_NO,   KC_LBRC, KC_RBRC, RGB_MOD,
+      KC_TRNS,   KC_NO,   KC_NO,   KC_NO, KC_HOME, KC_PGUP,                     KC_EQL,  KC_MINS, KC_NO,   KC_LBRC, KC_RBRC, UG_NEXT,
   //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
-      KC_TRNS,   KC_NO,   KC_NO,   KC_NO,  KC_END, KC_PGDN,                     KC_UNDS, KC_PLUS, KC_NO,   KC_LCBR, KC_RCBR, RGB_HUI,
+      KC_TRNS,   KC_NO,   KC_NO,   KC_NO,  KC_END, KC_PGDN,                     KC_UNDS, KC_PLUS, KC_NO,   KC_LCBR, KC_RCBR, UG_HUEU,
   //|--------+--------+--------+--------+--------+--------+--------|  |--------+--------+--------+--------+--------+--------+--------|
                                            KC_APP,   MO(3), KC_TRNS,   QK_RBT,   KC_TRNS, QK_BOOT
                                       //`--------------------------'  `--------------------------'
@@ -62,7 +62,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   //,-----------------------------------------------------.                    ,-----------------------------------------------------.
        KC_F12,   KC_F1,   KC_F2,   KC_F3,   KC_F4,   KC_F5,                     KC_F6,   KC_F7,   KC_F8,   KC_F9,   KC_F10,  KC_F11,
   //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
-      KC_TRNS, RGB_VAI, RGB_SAI, RGB_HUI, RGB_MOD, RGB_TOG,                     KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_NUM,
+      KC_TRNS, UG_VALU, UG_SATU, UG_HUEU, UG_NEXT, UG_TOGG,                     KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_NUM,
   //|--------+--------+--------+--------+--------+--------|                    |--------+--------+--------+--------+--------+--------|
       KC_TRNS,   KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_NO,                     KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_NO,   KC_CAPS,
   //|--------+--------+--------+--------+--------+--------+--------|  |--------+--------+--------+--------+--------+--------+--------|
