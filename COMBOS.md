@@ -1,0 +1,3 @@
+# Combos
+
+Every keymap in this userspace overlay (`crkbd`, `reviung/reviung34`, `keebio/nyquist`) uses the gboards [`combos.def` → `keymap_combo.h` generator](http://combos.gboards.ca/docs/install/) to define combos in a compact DSL rather than hand-writing the QMK `COMBO_ACTION` arrays. Each keymap directory ships both the source `combos.def` and its pre-generated `keymap_combo.h`; the header is committed so the build needs zero extra tooling at compile time. To regenerate after editing `combos.def`, install gboards' `gen_keymap_combo.py` per the link above and run `python gen_keymap_combo.py combos.def keymap_combo.h` from inside the keymap dir — the resulting header replaces the committed one and should be committed alongside the `.def` change.

@@ -1,0 +1,25 @@
+// mockingStandard
+COMB(dfBspc,    KC_BSPC,    KC_D, KC_F)
+COMB(fgDel,     KC_DEL,     KC_F, KC_G)
+COMB(jkEnt,     KC_ENT,     KC_J, KC_K)
+COMB(cbAppMenu, KC_APP,     KC_C,KC_B)
+
+// 5x3 BASE layer
+COMB(qwTab,     KC_TAB,     KC_Q, KC_W)
+COMB(qeEsc,     KC_ESC,     KC_Q, KC_E)
+COMB(ApostpSemiCol,     KC_SCLN,     KC_QUOT, KC_P)
+COMB(slashQuotBslash,     KC_BSLS,     KC_SLSH, KC_QUOT)
+
+// 5x3 LOWER layer
+COMB(oneTwoTilde,     KC_TILDE,     KC_1, KC_2)
+COMB(minusPlusPipe,     KC_PIPE,     KC_PMNS, KC_PPLS)
+
+// 5x3 RAISE layer
+COMB(exclamAtGrave,     KC_GRV,     KC_EXLM, KC_AT)
+
+SUBS(yiPhraseA,   "hENFiVVL4mFE",  KC_Y,KC_I)
+SUBS(yiPhraseB,   "MxgdelLetHEJ",  KC_H,KC_K)
+SUBS(yiPhraseC,   "Y5PvDZ9Bflt1G",  KC_Y,KC_N)
+
+// Template
+// COMB(12Name,     KC_DO,     KC_1, KC_2)
