@@ -14,9 +14,3 @@
 compile_commands.json
 .clangd/
 .cache/
-
-# gboards combo dispatcher header — vendored from upstream
-# (see COMBOS.md). Each keymap keeps a local copy on disk so QMK builds work
-# without VPATH gymnastics, but the file is third-party content tracked in
-# the parent monorepo under custom/tooling/gboards/g/keymap_combo.h, not here.
-**/keymap_combo.h
