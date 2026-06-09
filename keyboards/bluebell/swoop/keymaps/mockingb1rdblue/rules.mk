@@ -24,6 +24,10 @@ WS2812_DRIVER     = vendor
 OLED_ENABLE = yes
 OLED_DRIVER = ssd1306
 
+# Combos: gboards combos.def -> keymap_combo.h (committed, no build-time tooling).
+# http://combos.gboards.ca/docs/install/  ENTER and other keys are combos here.
+COMBO_ENABLE = yes
+
 # Userspace defaults
 LTO_ENABLE      = yes
 NKRO_ENABLE     = yes

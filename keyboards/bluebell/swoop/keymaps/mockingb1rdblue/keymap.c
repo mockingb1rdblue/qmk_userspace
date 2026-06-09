@@ -4,15 +4,25 @@
 // TurkeyBoards Swoop / Sea-Picro (RP2040): DAILY-DRIVER keymap.
 // Compiles via upstream bluebell/swoop + CONVERT_TO=promicro_rp2040 (see rules.mk).
 //
-// Layout/layers follow reviung34's default keymap (tri-layer _LOWER/_RAISE ->
-// _ADJUST, home-row mods on the outer columns, ENTER on the right pinky home key),
-// adapted onto the 36-key LAYOUT_split_3x5_3. Hardware ground truth (probe run
-// 2026-06-09, see README "CONFIRMED HARDWARE FACTS"):
+// Layout/layers follow the operator's OWN reviung34 keymap
+// (qmk_userspace/keyboards/reviung/reviung34/keymaps/mockingb1rdblue), NOT the
+// gtips upstream default. ENTER is a gboards COMBO (jk), not a pinky home key; the
+// right pinky home key is KC_QUOT. Layers below are the operator's 4 layers ported
+// 1:1 onto the 36-key LAYOUT_split_3x5_3 (30 alphas map straight across; reviung34
+// has 4 thumbs, swoop has 4 real thumb switches + 2 encoder pushes).
+//
+// Layer mapping (enum alias -> operator reviung34 layer index):
+//   _BASE   -> [0] alpha/base
+//   _LOWER  -> [1] nav + numpad + redo  (edit-oriented; left encoder = edit)
+//   _RAISE  -> [2] symbols + page-nav   (right encoder = page nav)
+//   _ADJUST -> [3] function row
+//
+// Hardware ground truth (probe run 2026-06-09, see README "CONFIRMED HARDWARE FACTS"):
 //   * Encoders are ALIVE on B4/B5 (GP8/GP9). Driver re-armed; encoder_map below.
 //   * Each hand has 2 real thumb switches + 1 ENCODER PUSH (the OUTER thumb cell).
 //       LEFT : push [3,2], real [3,3] [3,4]      RIGHT: real [7,3] [7,4], push [7,2]
-//     The 4 real switches carry reviung's thumb functions; the 2 encoder pushes
-//     carry the browser/edit binds (WBAK/WFWD on base, redo on lower).
+//     The 4 real switches carry the operator's reviung34 thumb functions; the 2
+//     encoder pushes carry the browser/edit binds (WBAK/WFWD on base, redo on lower).
 //
 // Three hardware-bring-up subsystems are enabled here for first-flash confirmation
 // (tracked as WyrdWeaver operator tasks, group mock1ngbboards):
@@ -23,6 +33,7 @@
 //                   SCL=GP3/D0); confirm against the physical board.
 
 #include QMK_KEYBOARD_H
+#include "keymap_combo.h" // gboards combos, http://combos.gboards.ca/docs/install/
 
 enum layers {
     _BASE,
@@ -31,62 +42,54 @@ enum layers {
     _ADJUST,
 };
 
-// --- reviung34 home-row mods (kept verbatim) ---
-#define CT_Q  LCTL_T(KC_Q)
-#define CT_CM RCTL_T(KC_COMM)
-#define SF_Z  LSFT_T(KC_Z)
-#define SF_SS RSFT_T(KC_SLSH)
-#define AL_X  LALT_T(KC_X)
-#define AL_DT RALT_T(KC_DOT)
-// --- thumb helpers ---
-#define LOWER MO(_LOWER)
-#define RA_SP LT(_RAISE, KC_SPC)
-
 // Thumb-cluster arg order in LAYOUT_split_3x5_3 is: k32 k33 k34  k74 k73 k72.
 //   LEFT : [3,2]=encoder push (outer)  [3,3]=real (outer)  [3,4]=real (inner)
 //   RIGHT: [7,4]=real (inner)  [7,3]=real (outer)  [7,2]=encoder push (outer)
+// Operator reviung34 thumbs: left inner=KC_SPC, left outer=KC_LCTL;
+//   right inner=LT(2,KC_HOME), right outer=KC_LGUI.
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+    // [0] base. Right pinky home = KC_QUOT (ENTER is the jk combo). Left inner
+    // bottom alpha is LT(1,KC_B) for the lower layer.
     [_BASE] = LAYOUT_split_3x5_3(
-        CT_Q,    KC_W,    KC_E,    KC_R,    KC_T,               KC_Y,    KC_U,    KC_I,    KC_O,    KC_P,
-        KC_A,    KC_S,    KC_D,    KC_F,    KC_G,               KC_H,    KC_J,    KC_K,    KC_L,    KC_ENT,
-        SF_Z,    AL_X,    KC_C,    KC_V,    KC_B,               KC_N,    KC_M,    CT_CM,   AL_DT,   SF_SS,
-              KC_WBAK,  LOWER,   KC_BSPC,                       RA_SP,   KC_TAB,  KC_WFWD
+        KC_Q,         KC_W, KC_E, KC_R, KC_T,                  KC_Y, KC_U, KC_I,    KC_O,           KC_P,
+        KC_A,         KC_S, KC_D, KC_F, KC_G,                  KC_H, KC_J, KC_K,    KC_L,           KC_QUOT,
+        LSFT_T(KC_Z), KC_X, KC_C, KC_V, LT(_LOWER, KC_B),      KC_N, KC_M, KC_COMM, RALT_T(KC_DOT), KC_SLSH,
+                 KC_WBAK, KC_LCTL, KC_SPC,             LT(_RAISE, KC_HOME), KC_LGUI, KC_WFWD
     ),
 
+    // [1] nav + numpad + redo. MO(3) on left ring (was reviung KC_F position).
     [_LOWER] = LAYOUT_split_3x5_3(
-        KC_EXLM, KC_AT,   KC_HASH, KC_DLR,  KC_PERC,            KC_CIRC, KC_AMPR, KC_ASTR, KC_LPRN, KC_RPRN,
-        KC_UNDS, KC_PLUS, KC_LCBR, KC_RCBR, KC_PIPE,            KC_LEFT, KC_DOWN, KC_UP,   KC_RGHT, KC_SCLN,
-        KC_LSFT, KC_ESC,  KC_LGUI, KC_LALT, KC_QUOT,            KC_HOME, KC_END,  KC_PGUP, KC_PGDN, KC_BSPC,
-              C(KC_Y),  KC_TRNS, KC_TRNS,                       KC_TRNS, KC_TRNS, KC_TRNS
+        KC_1,       KC_2,    KC_3,    KC_4,        KC_5,           KC_6,    KC_7, KC_8, KC_9, KC_0,
+        KC_UP,      KC_LEFT, KC_DOWN, KC_RGHT,     LCTL(KC_Y),     KC_EQL,  KC_4, KC_5, KC_6, KC_PPLS,
+        LSFT(KC_Z), KC_NO,   KC_NO,   MO(_ADJUST), KC_TRNS,        KC_UNDS, KC_1, KC_2, KC_3, KC_PMNS,
+                 C(KC_Y), KC_TRNS, KC_TRNS,                KC_END, KC_0, KC_TRNS
     ),
 
+    // [2] symbols + page-nav. MO(3) on the right inner thumb (was reviung 2u-right).
     [_RAISE] = LAYOUT_split_3x5_3(
-        KC_1,    KC_2,    KC_3,    KC_4,    KC_5,               KC_6,    KC_7,    KC_8,    KC_9,    KC_0,
-        KC_MINS, KC_EQL,  KC_LBRC, KC_RBRC, KC_BSLS,            XXXXXXX, XXXXXXX, KC_GRV,  KC_TILD, KC_COLN,
-        KC_LSFT, KC_ESC,  KC_RGUI, KC_LALT, KC_DQUO,            KC_TAB,  XXXXXXX, KC_RCTL, KC_RALT, KC_DEL,
-              KC_TRNS,  KC_TRNS, KC_TRNS,                       KC_TRNS, KC_TRNS, KC_TRNS
+        KC_EXLM, KC_AT, KC_HASH, KC_DLR,      KC_PERC,           KC_CIRC, KC_AMPR, KC_ASTR, KC_LPRN, KC_RPRN,
+        KC_PGUP, KC_NO, KC_PGDN, KC_NO,       KC_NO,             KC_EQL,  KC_MINS, KC_NO,   KC_LBRC, KC_RBRC,
+        KC_LSFT, KC_NO, KC_NO,   TG(_ADJUST), KC_TRNS,           KC_UNDS, KC_PLUS, KC_NO,   KC_LCBR, KC_RCBR,
+                 KC_TRNS, KC_TRNS, MO(_ADJUST),          KC_TRNS, KC_TRNS, KC_TRNS
     ),
 
+    // [3] function row.
     [_ADJUST] = LAYOUT_split_3x5_3(
-        KC_F1,   KC_F2,   KC_F3,   KC_F4,   KC_F5,              XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, KC_PSCR,
-        KC_F6,   KC_F7,   KC_F8,   KC_F9,   KC_F10,             XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
-        KC_F11,  KC_F12,  KC_CAPS, XXXXXXX, XXXXXXX,            QK_BOOT, XXXXXXX, XXXXXXX, XXXXXXX, XXXXXXX,
-              KC_TRNS,  KC_TRNS, KC_TRNS,                       KC_TRNS, KC_TRNS, KC_TRNS
+        KC_F1, KC_F2, KC_F3, KC_F4, KC_F5,                      KC_F6,  KC_F7,  KC_F8, KC_F9,   KC_F10,
+        KC_NO, KC_NO, KC_NO, KC_F9, KC_F10,                     KC_F11, KC_F12, KC_NO, KC_NO,   KC_NUM,
+        KC_NO, KC_NO, KC_NO, KC_NO, KC_TRNS,                    KC_NO,  KC_NO,  KC_NO, KC_TRNS, KC_CAPS,
+                 KC_TRNS, KC_TRNS, KC_TRNS,                KC_TRNS, KC_TRNS, KC_TRNS
     ),
 };
-
-layer_state_t layer_state_set_user(layer_state_t state) {
-    return update_tri_layer_state(state, _LOWER, _RAISE, _ADJUST);
-}
 
 #ifdef ENCODER_MAP_ENABLE
 // Rotary-encoder bindings, preserved verbatim from the prior build (index 0 = left,
 // 1 = right; ENCODER_CCW_CW(ccw, cw)). Designated initializers place each layer's
-// row at its enum index, so the reviung4-layer reorder is handled automatically.
+// row at its enum index.
 //   _BASE  L: word-jump (Ctrl+Left/Right)   R: mousewheel scroll
 //   _LOWER L: edit (Ctrl+Bspc / Undo)       R: dead
 //   _RAISE L: dead                          R: page nav
-//   _ADJUST: fall through to base
+//   _ADJUST: fall through (TRNS)
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
     [_BASE]   = { ENCODER_CCW_CW(C(KC_LEFT), C(KC_RIGHT)), ENCODER_CCW_CW(MS_WHLD, MS_WHLU) },
     [_LOWER]  = { ENCODER_CCW_CW(C(KC_BSPC), C(KC_Z)),     ENCODER_CCW_CW(KC_NO,   KC_NO)   },

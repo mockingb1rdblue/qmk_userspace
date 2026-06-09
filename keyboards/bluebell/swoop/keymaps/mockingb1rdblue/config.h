@@ -7,6 +7,11 @@
 // Tap/hold tuning, carried over from crkbd/mockingb1rdblue.
 #define TAPPING_TERM 150
 
+// gboards combos (combos.def -> keymap_combo.h). Matches the operator's reviung34
+// keymap config: variable-length combo array + 40ms chord window.
+#define COMBO_VARIABLE_LEN
+#define COMBO_TERM 40
+
 // ===========================================================================
 // RGB matrix: per-key ws2812 on D3/GP0, 36 LEDs (split 18/18).
 // ===========================================================================
