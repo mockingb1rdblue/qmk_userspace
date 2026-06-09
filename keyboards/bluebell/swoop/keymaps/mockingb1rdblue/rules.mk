@@ -1,31 +1,33 @@
-# TurkeyBoards Swoop variant — Sea-Picro controller (RP2040, SparkFun Pro Micro
-# RP2040 pin-compatible per joshajohnson.com/sea-picro). Compile upstream
-# bluebell/swoop with QMK's stock Pro-Micro -> Pro-Micro-RP2040 converter; the
-# converter rewrites every AVR pad name (D3, B1, F4...) to its RP2040 GP equivalent
-# at build time (see qmk_firmware/platforms/chibios/converters/promicro_to_promicro_rp2040/_pin_defs.h).
+# TurkeyBoards Swoop variant: Sea-Picro controller (RP2040, SparkFun Pro Micro
+# RP2040 pin-compatible). Compile upstream bluebell/swoop with QMK's stock
+# Pro-Micro -> Pro-Micro-RP2040 converter; it rewrites every AVR pad name (D3,
+# B4...) to its RP2040 GP equivalent at build time.
 CONVERT_TO = promicro_rp2040
 
-# PIN-DISCOVERY PROBE BUILD (2026-06-09): the rotary encoders register nothing on
-# the upstream B4/B5 wiring. Disable the encoder driver so it stops owning GP8/GP9,
-# letting keymap.c sweep those (and the other free GPIOs) as raw inputs to find the
-# real encoder pins empirically. Restore both lines to re-arm the daily-driver
-# encoders once the probe reports the wiring:
-#   ENCODER_ENABLE     = yes
-#   ENCODER_MAP_ENABLE = yes
-ENCODER_ENABLE     = no
-ENCODER_MAP_ENABLE = no
+# DAILY DRIVER (2026-06-09): encoders confirmed alive on B4/B5 (GP8/GP9) by the
+# pin-discovery probe + stock vendor Vial. Driver re-armed; encoder_map carries the
+# preserved per-layer rotate bindings.
+ENCODER_ENABLE     = yes
+ENCODER_MAP_ENABLE = yes
 
-# RGB: vendor unit is per-key RGB matrix; target = 18/18 split, no underglow.
-# Disabled in this scaffold — pin map and LED-position table require the vendor PCB.
-# When PCB lands: flip RGB_MATRIX_ENABLE to yes and add the config.h block for
-# RGB_MATRIX_LED_COUNT 36 + driver/data-pin overrides.
+# RGB: per-key matrix, ws2812 on D3/GP0, 36 LEDs split 18/18. ws2812 vendor driver
+# = RP2040 PIO (bitbang is unreliable on RP2040). rgblight (underglow) stays OFF;
+# the keyboard.json still declares an rgblight block but RGBLIGHT_ENABLE=no compiles
+# it out, leaving the ws2812 data pin to RGB_MATRIX.
 RGBLIGHT_ENABLE   = no
-RGB_MATRIX_ENABLE = no
+RGB_MATRIX_ENABLE = yes
+RGB_MATRIX_DRIVER = ws2812
+WS2812_DRIVER     = vendor
+
+# OLED: 128x32 SSD1306 over I2C (SSD1306 is the default driver). I2C pins are set
+# in config.h (BEST-GUESS GP2/GP3, verify on hardware).
+OLED_ENABLE = yes
+OLED_DRIVER = ssd1306
 
 # Userspace defaults
 LTO_ENABLE      = yes
 NKRO_ENABLE     = yes
-MOUSEKEY_ENABLE = yes  # required for KC_WH_U / KC_WH_D encoder scroll on L0 right
-EXTRAKEY_ENABLE = yes  # browser/system keys (KC_WBAK / KC_WFWD) for future push binds
+MOUSEKEY_ENABLE = yes  # KC_WH_U / KC_WH_D encoder scroll on L0 right
+EXTRAKEY_ENABLE = yes  # KC_WBAK / KC_WFWD browser keys on the encoder pushes
 CONSOLE_ENABLE  = no
 COMMAND_ENABLE  = no
