@@ -5,22 +5,17 @@
 #define EE_HANDS
 
 // ===========================================================================
-// Tap/hold: HOLD_ON_OTHER_KEY_PRESS (operator request 2026-06-10). Holding a
-// tap-hold key and pressing ANY other key settles the hold IMMEDIATELY, no
-// waiting out TAPPING_TERM. z(hold)+a => Shift+A the instant `a` goes down.
-// The previous roll-protection stack (FLOW_TAP_TERM, CHORDAL_HOLD,
-// PERMISSIVE_HOLD) is removed: all three force/await TAP on overlap and
-// directly defeat this behavior. Trade-off: fast same-hand rolls across a
-// mod-tap (e.g. z->a in one motion) will now fire the mod.
-// Docs: docs.qmk.fm/tap_hold#hold-on-other-key-press
+// Tap/hold: EXACT port of the operator's reviung34 originals (operator request
+// 2026-06-10: "my originals were set perfectly"). The reviung config is a bare
+// TAPPING_TERM 150 with NO extra modes (PERMISSIVE_HOLD commented out there).
+// Modern QMK's default overlap rule already matches the old default the
+// reviung ran (IGNORE_MOD_TAP_INTERRUPT became the default in 2022 and was
+// removed as a flag): keys overlapping inside the term settle as TAP; a hold
+// fires only by outlasting the 150ms term. HOLD_ON_OTHER_KEY_PRESS,
+// FLOW_TAP_TERM, CHORDAL_HOLD, PERMISSIVE_HOLD, QUICK_TAP_TERM: all
+// intentionally absent.
 // ===========================================================================
-#define TAPPING_TERM 175
-#define HOLD_ON_OTHER_KEY_PRESS
-
-// Quick Tap: a fast re-press of the same key repeats the TAP instead of holding
-// (stops a held "ZZ"/"BB"). Shorter than TAPPING_TERM so it only catches genuine
-// double-taps.
-#define QUICK_TAP_TERM 120
+#define TAPPING_TERM 150
 
 // gboards combos (combos.def -> keymap_combo.h). Matches the operator's reviung34
 // keymap config: variable-length combo array + 40ms chord window.
@@ -55,6 +50,8 @@
 #define I2C1_SCL_PIN D0
 #define OLED_TIMEOUT 60000
 
-// Sync WPM master->slave so the bongo cat animates on BOTH OLEDs (the slave
-// half has no keypress data of its own; without this its cat never taps).
-#define SPLIT_WPM_ENABLE
+// Sync input-activity timestamps master<->slave so the bongo cat smacks on
+// EVERY keystroke on BOTH OLEDs (the slave never sees the other half's key
+// events; last_input_activity_time() is the only per-keystroke signal QMK
+// syncs across the split).
+#define SPLIT_ACTIVITY_ENABLE

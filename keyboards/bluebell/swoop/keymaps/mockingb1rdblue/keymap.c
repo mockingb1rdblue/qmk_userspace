@@ -141,12 +141,14 @@ led_config_t g_led_config = {
 #endif
 
 #ifdef OLED_ENABLE
-// Bongo cat on BOTH OLEDs (no is_keyboard_master() gate; the slave animates
-// via SPLIT_WPM_ENABLE in config.h). Frames + render loop live in bongo.h.
+// Bongo cat on BOTH OLEDs (no is_keyboard_master() gate; the slave reacts via
+// SPLIT_ACTIVITY_ENABLE in config.h). Frames + render loop live in bongo.h.
 #include "bongo.h"
 
+// Right half's OLED is mounted rotated 180deg relative to the left (hardware
+// confirmed 2026-06-10: cat rendered upside down on the right).
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
-    return OLED_ROTATION_0;
+    return is_keyboard_left() ? OLED_ROTATION_0 : OLED_ROTATION_180;
 }
 
 bool oled_task_user(void) {

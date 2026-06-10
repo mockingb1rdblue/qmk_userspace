@@ -24,10 +24,6 @@ WS2812_DRIVER     = vendor
 OLED_ENABLE = yes
 OLED_DRIVER = ssd1306
 
-# WPM drives the bongo cat animation speed on both OLEDs (SPLIT_WPM_ENABLE in
-# config.h syncs it to the slave half).
-WPM_ENABLE = yes
-
 # Combos: gboards combos.def -> keymap_combo.h (committed, no build-time tooling).
 # http://combos.gboards.ca/docs/install/  ENTER and other keys are combos here.
 COMBO_ENABLE = yes
