@@ -36,6 +36,9 @@
 #define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CYCLE_LEFT_RIGHT
 #define RGB_MATRIX_DEFAULT_VAL 150
 #define RGB_MATRIX_DEFAULT_SPD 100
+// Sleep with the OLEDs: LEDs off after 1 min of no input (and on host suspend).
+#define RGB_MATRIX_TIMEOUT 60000
+#define RGB_MATRIX_SLEEP
 
 // ===========================================================================
 // OLED: 128x32 SSD1306 over I2C1.  *** PINS ARE A BEST-GUESS, NOT VERIFIED ***
