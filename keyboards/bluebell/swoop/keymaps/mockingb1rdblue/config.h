@@ -4,8 +4,35 @@
 // `qmk flash ... -bl uf2-split-{left,right}`). Matches upstream bluebell/swoop.
 #define EE_HANDS
 
-// Tap/hold tuning, carried over from crkbd/mockingb1rdblue.
-#define TAPPING_TERM 150
+// ===========================================================================
+// Tap/hold tuning for ~100 wpm: fixes Z/B false-holds (mod-taps mis-settling
+// as Shift/layer during fast typing). The lever for false-HOLDs is streak
+// suppression (Flow Tap), NOT a shorter term, so TAPPING_TERM is raised a touch
+// to give deliberate holds room. Brief + QMK doc cites: docs.qmk.fm/tap_hold.
+// ===========================================================================
+// Slight raise from the old 150: widen the hold-decision window for genuine
+// holds; Flow Tap handles the speed case below.
+#define TAPPING_TERM 175
+
+// Flow Tap (QMK 0.27+): if a tap-hold key is pressed within this window of the
+// previous key, force TAP, killing holds caused by typing rolls. Primary fix.
+#define FLOW_TAP_TERM 150
+
+// Chordal Hold: a same-hand next key settles as TAP (roll); only cross-hand
+// chords are allowed to HOLD. Handedness map: chordal_hold_handedness() in
+// keymap.c. Backstops Flow Tap for same-hand rolls.
+#define CHORDAL_HOLD
+
+// Permissive Hold: only HOLD when another key is pressed AND released inside the
+// term (full nested press), keeping deliberate cross-hand mod-chords snappy
+// without re-introducing roll-induced false holds.
+#define PERMISSIVE_HOLD
+
+// Quick Tap: a fast re-press of the same key repeats the TAP instead of holding
+// (stops a held "ZZ"/"BB"). Shorter than TAPPING_TERM so it only catches genuine
+// double-taps. HOLD_ON_OTHER_KEY_PRESS is intentionally NOT defined (it would
+// force holds on fast rolls, i.e. the exact bug being fixed).
+#define QUICK_TAP_TERM 120
 
 // gboards combos (combos.def -> keymap_combo.h). Matches the operator's reviung34
 // keymap config: variable-length combo array + 40ms chord window.

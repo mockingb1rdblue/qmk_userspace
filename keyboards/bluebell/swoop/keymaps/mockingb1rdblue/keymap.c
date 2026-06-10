@@ -90,12 +90,23 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 //   _LOWER L: edit (Ctrl+Bspc / Undo)       R: dead
 //   _RAISE L: dead                          R: page nav
 //   _ADJUST: fall through (TRNS)
+// Directions flipped 2026-06-10: hardware confirmed both encoders rotated
+// backwards, so the two args of every ENCODER_CCW_CW(ccw, cw) are swapped.
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
-    [_BASE]   = { ENCODER_CCW_CW(C(KC_LEFT), C(KC_RIGHT)), ENCODER_CCW_CW(MS_WHLD, MS_WHLU) },
-    [_LOWER]  = { ENCODER_CCW_CW(C(KC_BSPC), C(KC_Z)),     ENCODER_CCW_CW(KC_NO,   KC_NO)   },
-    [_RAISE]  = { ENCODER_CCW_CW(KC_NO,      KC_NO),       ENCODER_CCW_CW(KC_PGDN, KC_PGUP) },
-    [_ADJUST] = { ENCODER_CCW_CW(KC_TRNS,    KC_TRNS),     ENCODER_CCW_CW(KC_TRNS, KC_TRNS) },
+    [_BASE]   = { ENCODER_CCW_CW(C(KC_RIGHT), C(KC_LEFT)), ENCODER_CCW_CW(MS_WHLU, MS_WHLD) },
+    [_LOWER]  = { ENCODER_CCW_CW(C(KC_Z),     C(KC_BSPC)), ENCODER_CCW_CW(KC_NO,   KC_NO)   },
+    [_RAISE]  = { ENCODER_CCW_CW(KC_NO,       KC_NO),      ENCODER_CCW_CW(KC_PGUP, KC_PGDN) },
+    [_ADJUST] = { ENCODER_CCW_CW(KC_TRNS,     KC_TRNS),    ENCODER_CCW_CW(KC_TRNS, KC_TRNS) },
 };
+#endif
+
+#ifdef CHORDAL_HOLD
+// Per-key handedness for Chordal Hold (config.h). Split doubles the 4 physical
+// rows: left half = matrix rows 0-3, right half = rows 4-7 (thumbs on rows 3/7).
+// A same-hand next key settles a mod-tap as TAP (roll); cross-hand allows HOLD.
+char chordal_hold_handedness(keypos_t key) {
+    return (key.row < MATRIX_ROWS / 2) ? 'L' : 'R';
+}
 #endif
 
 #ifdef RGB_MATRIX_ENABLE
