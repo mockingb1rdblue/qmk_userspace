@@ -5,33 +5,21 @@
 #define EE_HANDS
 
 // ===========================================================================
-// Tap/hold tuning for ~100 wpm: fixes Z/B false-holds (mod-taps mis-settling
-// as Shift/layer during fast typing). The lever for false-HOLDs is streak
-// suppression (Flow Tap), NOT a shorter term, so TAPPING_TERM is raised a touch
-// to give deliberate holds room. Brief + QMK doc cites: docs.qmk.fm/tap_hold.
+// Tap/hold: HOLD_ON_OTHER_KEY_PRESS (operator request 2026-06-10). Holding a
+// tap-hold key and pressing ANY other key settles the hold IMMEDIATELY, no
+// waiting out TAPPING_TERM. z(hold)+a => Shift+A the instant `a` goes down.
+// The previous roll-protection stack (FLOW_TAP_TERM, CHORDAL_HOLD,
+// PERMISSIVE_HOLD) is removed: all three force/await TAP on overlap and
+// directly defeat this behavior. Trade-off: fast same-hand rolls across a
+// mod-tap (e.g. z->a in one motion) will now fire the mod.
+// Docs: docs.qmk.fm/tap_hold#hold-on-other-key-press
 // ===========================================================================
-// Slight raise from the old 150: widen the hold-decision window for genuine
-// holds; Flow Tap handles the speed case below.
 #define TAPPING_TERM 175
-
-// Flow Tap (QMK 0.27+): if a tap-hold key is pressed within this window of the
-// previous key, force TAP, killing holds caused by typing rolls. Primary fix.
-#define FLOW_TAP_TERM 150
-
-// Chordal Hold: a same-hand next key settles as TAP (roll); only cross-hand
-// chords are allowed to HOLD. Handedness map: chordal_hold_handedness() in
-// keymap.c. Backstops Flow Tap for same-hand rolls.
-#define CHORDAL_HOLD
-
-// Permissive Hold: only HOLD when another key is pressed AND released inside the
-// term (full nested press), keeping deliberate cross-hand mod-chords snappy
-// without re-introducing roll-induced false holds.
-#define PERMISSIVE_HOLD
+#define HOLD_ON_OTHER_KEY_PRESS
 
 // Quick Tap: a fast re-press of the same key repeats the TAP instead of holding
 // (stops a held "ZZ"/"BB"). Shorter than TAPPING_TERM so it only catches genuine
-// double-taps. HOLD_ON_OTHER_KEY_PRESS is intentionally NOT defined (it would
-// force holds on fast rolls, i.e. the exact bug being fixed).
+// double-taps.
 #define QUICK_TAP_TERM 120
 
 // gboards combos (combos.def -> keymap_combo.h). Matches the operator's reviung34
@@ -66,3 +54,7 @@
 #define I2C1_SDA_PIN D1
 #define I2C1_SCL_PIN D0
 #define OLED_TIMEOUT 60000
+
+// Sync WPM master->slave so the bongo cat animates on BOTH OLEDs (the slave
+// half has no keypress data of its own; without this its cat never taps).
+#define SPLIT_WPM_ENABLE

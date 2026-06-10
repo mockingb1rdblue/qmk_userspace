@@ -100,15 +100,6 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 };
 #endif
 
-#ifdef CHORDAL_HOLD
-// Per-key handedness for Chordal Hold (config.h). Split doubles the 4 physical
-// rows: left half = matrix rows 0-3, right half = rows 4-7 (thumbs on rows 3/7).
-// A same-hand next key settles a mod-tap as TAP (roll); cross-hand allows HOLD.
-char chordal_hold_handedness(keypos_t key) {
-    return (key.row < MATRIX_ROWS / 2) ? 'L' : 'R';
-}
-#endif
-
 #ifdef RGB_MATRIX_ENABLE
 // Per-key LED map. One ws2812 LED per key, 18 per half (indices 0-17 left,
 // 18-35 right). matrix_co maps each [row][col] to its LED index (NO_LED for the
@@ -150,30 +141,16 @@ led_config_t g_led_config = {
 #endif
 
 #ifdef OLED_ENABLE
-// Minimal layer + modifier readout. 128x32 default geometry = 21 cols x 4 rows.
+// Bongo cat on BOTH OLEDs (no is_keyboard_master() gate; the slave animates
+// via SPLIT_WPM_ENABLE in config.h). Frames + render loop live in bongo.h.
+#include "bongo.h"
+
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
     return OLED_ROTATION_0;
 }
 
 bool oled_task_user(void) {
-    oled_write_P(PSTR("Swoop\n"), false);
-
-    oled_write_P(PSTR("Lyr: "), false);
-    switch (get_highest_layer(layer_state)) {
-        case _BASE:   oled_write_ln_P(PSTR("Base"),   false); break;
-        case _LOWER:  oled_write_ln_P(PSTR("Lower"),  false); break;
-        case _RAISE:  oled_write_ln_P(PSTR("Raise"),  false); break;
-        case _ADJUST: oled_write_ln_P(PSTR("Adjust"), false); break;
-        default:      oled_write_ln_P(PSTR("?"),      false); break;
-    }
-
-    uint8_t mods = get_mods() | get_oneshot_mods();
-    oled_write_P(PSTR("Mod: "), false);
-    oled_write_P((mods & MOD_MASK_SHIFT) ? PSTR("S") : PSTR("_"), false);
-    oled_write_P((mods & MOD_MASK_CTRL)  ? PSTR("C") : PSTR("_"), false);
-    oled_write_P((mods & MOD_MASK_ALT)   ? PSTR("A") : PSTR("_"), false);
-    oled_write_ln_P((mods & MOD_MASK_GUI) ? PSTR("G") : PSTR("_"), false);
-
+    render_bongo();
     return false;
 }
 #endif
