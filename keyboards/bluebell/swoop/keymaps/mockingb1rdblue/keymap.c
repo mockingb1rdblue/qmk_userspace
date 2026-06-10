@@ -145,10 +145,10 @@ led_config_t g_led_config = {
 // SPLIT_ACTIVITY_ENABLE in config.h). Frames + render loop live in bongo.h.
 #include "bongo.h"
 
-// Right half's OLED is mounted rotated 180deg relative to the left (hardware
-// confirmed 2026-06-10: cat rendered upside down on the right).
+// Both OLEDs are mounted rotated 180deg (hardware confirmed 2026-06-10: right
+// first, then left after the software-mirror attempt went the wrong way).
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
-    return is_keyboard_left() ? OLED_ROTATION_0 : OLED_ROTATION_180;
+    return OLED_ROTATION_180;
 }
 
 bool oled_task_user(void) {

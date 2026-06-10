@@ -9,9 +9,6 @@
 //     0..3, right rows 4..7 -- split_common stores each half at a fixed row
 //     offset on both sides, so this works whether the half is master or
 //     slave; a count INCREASE is a press, releases are ignored);
-//   * the LEFT half's art is mirrored horizontally at draw time so the two
-//     cats face each other (rotation is applied at flush, so reversing the
-//     128 bytes of each page in the raw buffer is a pure horizontal flip);
 //   * idle/prep/sleep pacing uses the whole-keyboard activity timestamp
 //     (SPLIT_ACTIVITY_ENABLE in config.h syncs it to the slave).
 #pragma once
@@ -64,30 +61,8 @@ static const char PROGMEM idle[IDLE_FRAMES][ANIM_SIZE] = {{0x00, 0x00, 0x00, 0x0
          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x80, 0x80, 0x40, 0x40, 0x40, 0x40, 0x20, 0x20, 0x20, 0x20, 0x10, 0x10, 0x10, 0x10, 0x08, 0x0f, 0x08, 0x08, 0x04, 0x04, 0x04, 0x04, 0x02, 0x02, 0x02, 0x02, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x0f, 0x0f, 0x07, 0x03, 0x03, 0x61, 0xf0, 0xf8, 0xfc, 0x60, 0x01, 0x01, 0x01, 0x3c, 0x78, 0xf8, 0xf0, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
     };
 
-// Draw a frame; on the left half, mirror it across the long (128px) axis:
-// a vertical top<->bottom flip. In the SSD1306 page buffer that is reversing
-// the page order (page p -> 3-p) AND the bit order inside every byte (each
-// byte is a vertical 8-pixel column, LSB at the top of the page). The x
-// columns stay put, so left/right orientation is untouched.
 static void bongo_draw(const char *frame) {
-    if (is_keyboard_left()) {
-        static char mirrored[OLED_MATRIX_SIZE];
-        const uint16_t pages = OLED_DISPLAY_HEIGHT / 8;
-        for (uint16_t page = 0; page < pages; page++) {
-            for (uint16_t x = 0; x < OLED_DISPLAY_WIDTH; x++) {
-                uint16_t s = (pages - 1 - page) * OLED_DISPLAY_WIDTH + x;
-                uint8_t  b = (s < ANIM_SIZE) ? pgm_read_byte(&frame[s]) : 0;
-                // reverse the 8 bits (vertical pixel column) of the byte
-                b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
-                b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
-                b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
-                mirrored[page * OLED_DISPLAY_WIDTH + x] = b;
-            }
-        }
-        oled_write_raw(mirrored, sizeof(mirrored));
-    } else {
-        oled_write_raw_P(frame, ANIM_SIZE);
-    }
+    oled_write_raw_P(frame, ANIM_SIZE);
 }
 
 // Count keys currently held on THIS physical half only.
