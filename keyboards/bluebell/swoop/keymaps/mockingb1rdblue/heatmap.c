@@ -31,6 +31,10 @@
 //   * SMOOTHNESS: value goes through a gamma-2.2 LUT (perceptual) plus per-LED
 //     temporal dithering (fractional carry across frames) so low-brightness fades
 //     don't band on the 8-bit ws2812. Target framerate ~38Hz (RGB_MATRIX_LED_FLUSH_LIMIT).
+//
+// rev-15: hardened only (behavior identical) -- defensive float->uint8 clamps in
+//     hm_color so a boundary rounding error can't wrap a 256 to a small value;
+//     explicit overflow-bound comments in the gamma/dither path and ring packing.
 
 #include QMK_KEYBOARD_H
 #include <stdbool.h>
@@ -80,6 +84,10 @@ static void hm_push_ring(uint8_t *ring, uint16_t depth, uint16_t *head,
     } else {
         (*fill)++;
     }
+    // Pack (layer<<6 | led): layer 0..3 (2 bits), led 0..HM_LEDS-1 (<=35, 6 bits).
+    // Max packed value is (3<<6)|35 == 0xE3, so a live entry can NEVER equal the
+    // 0xFF empty sentinel (that would need led==63). The underflow guard above
+    // (cnt[ol][oe] only decremented when nonzero) keeps counts >= 0.
     ring[*head] = (uint8_t)((layer << 6) | led);
     *head       = (uint16_t)((*head + 1) % depth);
     if (cnt[layer][led] < depth) cnt[layer][led]++;
@@ -134,23 +142,32 @@ static float hm_norm(uint16_t c, uint16_t denom) {
     return logf(1.0f + HM_K * u) / logf(1.0f + HM_K);
 }
 
+// Clamp a [0,255]-intended float to 0..255 *before* the uint8 cast, so a
+// boundary rounding error (e.g. t/0.30f landing at 255.0000x or 256.0 from float
+// representation) can never wrap a near-256 value down to a small one.
+static uint8_t hm_u8(float x) {
+    if (x < 0.0f) return 0;
+    if (x > 255.0f) return 255;
+    return (uint8_t)x;
+}
+
 // Hotness t (0..1) -> HSV. white->yellow->cyan->purple-pink; value tracks t.
 static hsv_t hm_color(float t, uint8_t maxv) {
     if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
     uint8_t h, s;
     if (t <= 0.30f) {                         // white -> yellow
         h = 43;
-        s = (uint8_t)(t / 0.30f * 255.0f);    // sat 0 (white) -> 255 (yellow)
+        s = hm_u8(t / 0.30f * 255.0f);        // sat 0 (white) -> 255 (yellow)
     } else if (t <= 0.63f) {                  // yellow -> cyan
-        uint8_t f = (uint8_t)((t - 0.30f) / 0.33f * 255.0f);
+        uint8_t f = hm_u8((t - 0.30f) / 0.33f * 255.0f);
         h = hm_lerp(43, 128, f);
         s = 255;
     } else {                                  // cyan -> purple-pink
-        uint8_t f = (uint8_t)((t - 0.63f) / 0.37f * 255.0f);
+        uint8_t f = hm_u8((t - 0.63f) / 0.37f * 255.0f);
         h = hm_lerp(128, 222, f);
         s = 255;
     }
-    uint8_t v = (uint8_t)(t * (float)maxv);
+    uint8_t v = hm_u8(t * (float)maxv);       // t<=1, maxv<=255 -> already in range
     return (hsv_t){h, s, v};
 }
 
@@ -172,6 +189,9 @@ static void hm_idle(uint8_t *mix, uint8_t *fade) {
         return;
     }
     if (since < (uint32_t)RGB_MATRIX_TIMEOUT) {       // 7s fade to black on LONG map
+        // Branch guard + fade_start def => into in [0, HM_FADEOUT_MS), so
+        // into*255/HM_FADEOUT_MS is in [0,254] and fade stays in [1,255]
+        // (no unsigned wrap). into*255 max ~1.78e6 fits uint32_t.
         uint32_t into = since - fade_start;
         *mix  = 255;
         *fade = (uint8_t)(255 - (into * 255 / HM_FADEOUT_MS));
@@ -204,10 +224,13 @@ void heatmap_render(uint8_t led_min, uint8_t led_max) {
         hsv_t hsv = hm_color(t, maxv);
         // Perceptual gamma + global idle fade, then temporal dither the residual
         // so sub-LSB brightness still shows across frames (smooth low-end fades).
-        uint16_t target = (uint16_t)hm_gamma[hsv.v] * fade;   // 0..255*255
-        uint16_t acc    = target + hm_carry[i];
-        hsv.v           = (uint8_t)(acc >> 8);
-        hm_carry[i]     = (uint8_t)(acc & 0xFF);
+        // Bounds (all fit uint16_t, max 65535): hm_gamma[hsv.v] in 0..255, fade in
+        // 0..255 -> target in 0..65025; +hm_carry[i] (0..255) -> acc in 0..65280.
+        // acc>>8 in 0..255 (high byte), acc&0xFF in 0..255 (fractional carry).
+        uint16_t target = (uint16_t)hm_gamma[hsv.v] * fade;   // 0..65025
+        uint16_t acc    = target + hm_carry[i];               // 0..65280
+        hsv.v           = (uint8_t)(acc >> 8);                // 0..255
+        hm_carry[i]     = (uint8_t)(acc & 0xFF);              // 0..255
 
         rgb_t rgb = hsv_to_rgb(hsv);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);

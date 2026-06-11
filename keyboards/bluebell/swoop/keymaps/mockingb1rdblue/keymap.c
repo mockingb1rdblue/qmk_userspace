@@ -141,23 +141,28 @@ led_config_t g_led_config = {
 #endif
 
 #ifdef RGB_MATRIX_ENABLE
-// Feed the per-layer keypress heatmap (heatmap.c). Runs every scan on BOTH
-// halves; the mirrored matrix + synced layer state keep the two sides' counters
-// identical so each renders its own LEDs correctly.
+// Feed BOTH custom RGB effects' key-DOWN trackers (ledmap.c = boot mapping
+// diagnostic; heatmap.c = selectable heatmap). Each keeps its OWN previous-scan
+// snapshot, so feeding both every scan is correct and independent. Runs on BOTH
+// halves; the mirrored matrix + synced layer state keep the two sides identical
+// so each renders its own LEDs correctly regardless of which mode is active.
+#    include "ledmap.h"
 #    include "heatmap.h"
 void matrix_scan_user(void) {
+    ledmap_record_scan();
     heatmap_record_scan();
 }
 
-// Pin the heatmap as the boot RGB mode. RGB_MATRIX_DEFAULT_MODE (config.h) only
-// seeds the EEPROM when it is blank/reset, so a board previously flashed with a
-// different effect keeps that STALE mode forever. Force the heatmap into the live
-// (RAM) state on every boot with the _noeeprom setters: this overrides stale
-// EEPROM without burning a write cycle, and because the mode is RAM-resident it
-// survives RGB_MATRIX_SLEEP (which only blanks the LEDs) -> resumes on wake.
+// Pin the led_map mapping diagnostic as the boot RGB mode. RGB_MATRIX_DEFAULT_MODE
+// (config.h) only seeds the EEPROM when it is blank/reset, so a board previously
+// flashed with a different effect keeps that STALE mode forever. Force led_map
+// into the live (RAM) state on every boot with the _noeeprom setters: this
+// overrides stale EEPROM without burning a write cycle, and because the mode is
+// RAM-resident it survives RGB_MATRIX_SLEEP (which only blanks the LEDs) ->
+// resumes on wake.
 void keyboard_post_init_user(void) {
     rgb_matrix_enable_noeeprom();
-    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_heatmap_neon);
+    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_led_map);
 }
 #endif
 
@@ -175,7 +180,59 @@ oled_rotation_t oled_init_user(oled_rotation_t rotation) {
     return is_keyboard_left() ? OLED_ROTATION_0 : OLED_ROTATION_180;
 }
 
+// Per-mode OLED: when the led_map mapping diagnostic is the active RGB mode,
+// replace the bongo cat with a text readout of the last key-down so the operator
+// can cross-check key -> LED on the display ("rRcC -> LEDnn H"). Any other RGB
+// mode (e.g. the heatmap) keeps the bongo cat. The readout reads ledmap.c's
+// last-press accessor; both halves show the same line (mirrored matrix + synced
+// state). The OLED text is small and cheap; it runs every oled_task tick.
+//
+// TODO(map): this is the minimal clean per-mode switch -- it does NOT animate or
+// honor the bongo idle/sleep pacing while in led_map mode (the RGB core handles
+// LED sleep; the OLED here just redraws the static last-press line until the
+// OLED_TIMEOUT core blanking kicks in). That is sufficient for the diagnostic.
+// If a richer led_map OLED (e.g. a mini key grid) is ever wanted, build it as a
+// dedicated render fn rather than entangling it with bongo.h.
+#ifdef RGB_MATRIX_ENABLE
+#    include "ledmap.h"
+static void render_ledmap_oled(void) {
+    oled_clear();
+    oled_set_cursor(0, 0);
+    oled_write_P(PSTR("LED MAP"), false);
+
+    uint8_t row, col, led;
+    bool    is_left;
+    oled_set_cursor(0, 1);
+    if (!ledmap_last_press(&row, &col, &led, &is_left)) {
+        oled_write_P(PSTR("press a key"), false);
+        return;
+    }
+    // Compose "rRcC -> LEDnn H" (e.g. "r2c3 -> LED14 L"). Build with the QMK
+    // helpers to avoid pulling in snprintf.
+    char line[20];
+    uint8_t p = 0;
+    line[p++] = 'r';
+    line[p++] = '0' + (row % 10);
+    line[p++] = 'c';
+    line[p++] = '0' + (col % 10);
+    line[p++] = ' '; line[p++] = '-'; line[p++] = '>'; line[p++] = ' ';
+    line[p++] = 'L'; line[p++] = 'E'; line[p++] = 'D';
+    if (led >= 10) line[p++] = '0' + (led / 10);
+    line[p++] = '0' + (led % 10);
+    line[p++] = ' ';
+    line[p++] = is_left ? 'L' : 'R';
+    line[p]   = '\0';
+    oled_write(line, false);
+}
+#endif
+
 bool oled_task_user(void) {
+#ifdef RGB_MATRIX_ENABLE
+    if (rgb_matrix_get_mode() == RGB_MATRIX_CUSTOM_led_map) {
+        render_ledmap_oled();
+        return false;
+    }
+#endif
     render_bongo();
     return false;
 }

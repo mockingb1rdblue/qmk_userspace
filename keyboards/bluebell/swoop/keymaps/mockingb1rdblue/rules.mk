@@ -18,9 +18,11 @@ RGBLIGHT_ENABLE   = no
 RGB_MATRIX_ENABLE = yes
 RGB_MATRIX_DRIVER = ws2812
 WS2812_DRIVER     = vendor
-# Per-layer neon keypress heatmap = custom RGB Matrix effect (rgb_matrix_user.inc
-# declares it; heatmap.c holds the rolling-window counters + color/idle math).
+# Custom RGB Matrix effects (rgb_matrix_user.inc declares both):
+#   ledmap.c  = press-to-light LED<->key mapping diagnostic (the BOOT mode).
+#   heatmap.c = per-layer neon keypress heatmap (selectable mode).
 RGB_MATRIX_CUSTOM_USER = yes
+SRC += ledmap.c
 SRC += heatmap.c
 
 # OLED: 128x32 SSD1306 over I2C (SSD1306 is the default driver). I2C pins are set

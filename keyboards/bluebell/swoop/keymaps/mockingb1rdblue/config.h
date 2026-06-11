@@ -31,11 +31,13 @@
 #define RGB_MATRIX_LED_COUNT 36
 #define RGB_MATRIX_SPLIT { 18, 18 }
 #define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150
-// Default = the per-layer neon keypress heatmap (custom effect in
-// rgb_matrix_user.inc / heatmap.c). Cycle-left-right kept enabled as a
-// selectable fallback mode.
+// Default = the press-to-light LED<->key MAPPING diagnostic (custom effect
+// led_map in rgb_matrix_user.inc / ledmap.c): press a key, its LED glows for ~1s
+// (left-half hue vs right-half hue) so the operator can confirm the LED wiring.
+// The per-layer neon keypress heatmap (heatmap_neon / heatmap.c) stays compiled
+// and selectable. Cycle-left-right also kept as a selectable fallback mode.
 #define ENABLE_RGB_MATRIX_CYCLE_LEFT_RIGHT
-#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_heatmap_neon
+#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_led_map
 #define RGB_MATRIX_DEFAULT_VAL 150
 #define RGB_MATRIX_DEFAULT_SPD 100
 // Sleep with the OLEDs: LEDs off after 1 min of no input (and on host suspend).
