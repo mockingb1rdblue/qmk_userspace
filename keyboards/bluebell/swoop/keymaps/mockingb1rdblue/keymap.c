@@ -145,8 +145,8 @@ led_config_t g_led_config = {
 // SPLIT_ACTIVITY_ENABLE in config.h). Frames + render loop live in bongo.h.
 #include "bongo.h"
 
-// Both OLEDs are mounted rotated 180deg (hardware confirmed 2026-06-10: right
-// first, then left after the software-mirror attempt went the wrong way).
+// Both OLEDs mounted rotated 180deg (hardware confirmed 2026-06-10).
+// Left half art is mirrored horizontally at draw time in bongo_draw().
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
     return OLED_ROTATION_180;
 }
