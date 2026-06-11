@@ -25,9 +25,11 @@
 #define IDLE_FRAMES 5
 #define TAP_FRAMES 2
 #define ANIM_FRAME_DURATION 200 // ms per idle frame
-#define TAP_DOWN_MS 70          // paw holds DOWN this long per smack, then RAISES
+#define TAP_DOWN_MS 40          // paw holds DOWN this long per smack, then RAISES
                                 // (even while other keys are held); short enough
-                                // that a raise is visible between keystrokes
+                                // that a raise is visible between keystrokes.
+                                // Floor ~20-30ms: the OLED I2C write is ~10ms and
+                                // the page buffer can't refresh meaningfully faster.
 #define PREP_MS 1000            // paws-up window after the last (global) keystroke
 #define ANIM_SIZE 636           // bytes per frame; the 128x32 buffer clamps at 512
 
