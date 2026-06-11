@@ -9,10 +9,15 @@
 //     a right-half key-down smacks the RIGHT paw (tap[1]). The paw tracks the
 //     physical half struck, NOT which display this is.
 //   * This needs the full matrix on both sides: SPLIT_TRANSPORT_MIRROR
-//     (config.h) mirrors the master's rows to the slave, so popcounting the
-//     left rows (0..3) and right rows (4..7) separately works on either half
-//     (master or slave). A per-half count INCREASE is a press; releases are
-//     ignored.
+//     (config.h) mirrors the master's rows to the slave, so scanning the left
+//     rows (0..3) and right rows (4..7) separately works on either half
+//     (master or slave). Detection is PER KEYPRESS: a key-down is a 0->1 bit
+//     transition vs the previous scan (cur & ~prev), counted per half. This is
+//     why a process_record hook is NOT used -- that runs on the master only and
+//     would leave the slave OLED dead; the mirrored matrix drives both. It also
+//     supersedes the old popcount-INCREASE test, which missed rolls (releasing
+//     one key as you press the next keeps the count flat -> dropped smacks).
+//     Releases never register.
 //   * EVERY key-down smacks again and a held key NEVER blocks it: each smack
 //     holds the paw DOWN for TAP_DOWN_MS then RAISES (back to prep), so a key
 //     pressed while another is still held interrupts with a fresh raise+smack
@@ -25,11 +30,17 @@
 #define IDLE_FRAMES 5
 #define TAP_FRAMES 2
 #define ANIM_FRAME_DURATION 200 // ms per idle frame
-#define TAP_DOWN_MS 40          // paw holds DOWN this long per smack, then RAISES
-                                // (even while other keys are held); short enough
-                                // that a raise is visible between keystrokes.
-                                // Floor ~20-30ms: the OLED I2C write is ~10ms and
-                                // the page buffer can't refresh meaningfully faster.
+#define TAP_DOWN_MS 20          // paw holds DOWN this long per smack, then RAISES
+                                // (even while other keys are held). This is the
+                                // FLOOR, not a tuned value: a full 128x32 frame is
+                                // 512B and at 400kHz I2C1 one push is ~11-12ms, so
+                                // ~20ms is the fastest the panel can show a distinct
+                                // down frame and then a raise. Going lower is
+                                // meaningless -- the down frame wouldn't reliably
+                                // land before the raise overwrites it. (Chosen over
+                                // a dynamic/typing-speed-scaled hold: just peg the
+                                // floor and let every keystroke smack as fast as the
+                                // display can keep up.)
 #define PREP_MS 1000            // paws-up window after the last (global) keystroke
 #define ANIM_SIZE 636           // bytes per frame; the 128x32 buffer clamps at 512
 
@@ -41,8 +52,11 @@ static uint8_t  current_idle_frame = 0;
 // display: a left-half key-down draws tap[0], a right-half key-down draws
 // tap[1] -- identically on both OLEDs.
 static uint8_t  current_tap_frame  = 0;
-static uint8_t  prev_left_pressed  = 0;
-static uint8_t  prev_right_pressed = 0;
+// Snapshot of the (mirrored) matrix from the previous render. A key-DOWN is a
+// 0->1 bit transition vs this snapshot -- NOT a popcount increase. The popcount
+// test missed rolls (release A + press B in one scan keeps the count flat), so
+// fast typing dropped smacks; the per-bit edge catches every individual press.
+static matrix_row_t prev_rows[MATRIX_ROWS] = {0};
 static uint32_t own_tap_timer      = 0;
 
 static const char PROGMEM idle[IDLE_FRAMES][ANIM_SIZE] = {{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x40, 0x40, 0x40, 0x20, 0x20, 0x20, 0x20, 0x20, 0x18, 0x04, 0x02, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x20, 0x40, 0x40, 0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -101,14 +115,19 @@ static void bongo_draw(const char *frame) {
     }
 }
 
-// Count keys currently held on one half. `start` selects the half: left =
-// rows [0, MATRIX_ROWS/2), right = rows [MATRIX_ROWS/2, MATRIX_ROWS). Thanks to
-// SPLIT_TRANSPORT_MIRROR both halves see the full matrix, so this returns the
-// real per-half count whether this code runs on the master or the slave.
-static uint8_t bongo_half_pressed(uint8_t start) {
+// Count keys that NEWLY went down (0->1 since last render) on one half, and
+// fold the current matrix into prev_rows for those rows. `start` selects the
+// half: left = rows [0, MATRIX_ROWS/2), right = rows [MATRIX_ROWS/2,
+// MATRIX_ROWS). Thanks to SPLIT_TRANSPORT_MIRROR both halves see the full
+// matrix, so this returns the real per-half key-down edges whether this code
+// runs on the master or the slave -- per keypress, rolls included.
+static uint8_t bongo_half_newpresses(uint8_t start) {
     uint8_t n = 0;
     for (uint8_t r = start; r < start + MATRIX_ROWS / 2; r++) {
-        n += __builtin_popcount(matrix_get_row(r));
+        matrix_row_t cur   = matrix_get_row(r);
+        matrix_row_t newly = cur & ~prev_rows[r]; // bits that turned ON
+        prev_rows[r]       = cur;
+        n += __builtin_popcount(newly);
     }
     return n;
 }
@@ -117,20 +136,19 @@ static void render_bongo(void) {
     uint32_t since = last_input_activity_elapsed();
     if (since > OLED_TIMEOUT) {
         oled_off();
-        prev_left_pressed  = bongo_half_pressed(0);
-        prev_right_pressed = bongo_half_pressed(MATRIX_ROWS / 2);
+        // Re-baseline the snapshot so the wake keystroke isn't double-counted as
+        // a flood of phantom edges (each call folds its half into prev_rows).
+        bongo_half_newpresses(0);
+        bongo_half_newpresses(MATRIX_ROWS / 2);
         return;
     }
     oled_on();
 
-    // Key-DOWN anywhere: a half's pressed-count increased. Releases only lower
-    // it. The struck half picks the paw, identically on BOTH OLEDs.
-    uint8_t left_pressed  = bongo_half_pressed(0);
-    uint8_t right_pressed = bongo_half_pressed(MATRIX_ROWS / 2);
-    bool    left_down     = left_pressed  > prev_left_pressed;
-    bool    right_down    = right_pressed > prev_right_pressed;
-    prev_left_pressed  = left_pressed;
-    prev_right_pressed = right_pressed;
+    // Key-DOWN anywhere: a half had at least one 0->1 edge this scan (per
+    // keypress, rolls included). Releases never register. The struck half picks
+    // the paw, identically on BOTH OLEDs.
+    bool left_down  = bongo_half_newpresses(0) > 0;
+    bool right_down = bongo_half_newpresses(MATRIX_ROWS / 2) > 0;
 
     if (left_down || right_down) {
         // Left half -> left paw (tap[0]); right half -> right paw (tap[1]). If
