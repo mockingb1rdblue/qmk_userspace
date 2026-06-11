@@ -22,7 +22,10 @@
 
 static uint32_t anim_timer         = 0;
 static uint8_t  current_idle_frame = 0;
-static uint8_t  current_tap_frame  = 0;
+// Init to 1 so the FIRST smack after idle plays tap[0] ((1+1)%2). With the
+// one-horizontal-flip-per-half transform (see oled_init_user), tap[0] reads as
+// the LEFT paw on both halves; subsequent smacks alternate left/right.
+static uint8_t  current_tap_frame  = 1;
 static uint8_t  prev_own_pressed   = 0;
 static uint32_t own_tap_timer      = 0;
 
