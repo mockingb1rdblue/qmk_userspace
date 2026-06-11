@@ -41,6 +41,9 @@
 // Sleep with the OLEDs: LEDs off after 1 min of no input (and on host suspend).
 #define RGB_MATRIX_TIMEOUT 60000
 #define RGB_MATRIX_SLEEP
+// Drive the matrix at ~38Hz (26ms flush floor) so the heatmap's gamma + temporal
+// -dither fades (heatmap.c) have enough frames to look smooth, not steppy.
+#define RGB_MATRIX_LED_FLUSH_LIMIT 26
 
 // ===========================================================================
 // OLED: 128x32 SSD1306 over I2C1.  *** PINS ARE A BEST-GUESS, NOT VERIFIED ***

@@ -3,87 +3,97 @@
 //
 // Per-layer neon keypress heatmap (RGB Matrix custom effect backend).
 //
-// BEHAVIOR CONTRACT (operator spec 2026-06-11):
-//   * Rolling window of the last HM_WINDOW (2000) key-DOWNs across the whole
-//     keyboard, bucketed per (layer, LED). On layer change the effect simply
-//     reads that layer's buckets, so each layer shows ITS OWN hot keys.
-//   * Counting runs on BOTH halves from the mirrored matrix (0->1 edges, same
-//     as bongo). SPLIT_TRANSPORT_MIRROR gives both sides the full matrix and
-//     SPLIT_LAYER_STATE_ENABLE keeps the active layer in sync, so both halves
-//     build IDENTICAL counters and each renders its own 18 LEDs correctly.
-//     A process_record hook would only run on the master and leave the slave
-//     half's heatmap blank -- hence matrix-edge counting instead.
-//   * Color ramp by normalized hotness t in [0,1]:
-//       t=0  -> brightness ZERO (off)         (least pressed / unpressed)
-//       low  -> WHITE   (sat ramps up from 0)
-//             -> YELLOW
-//             -> CYAN
-//       t=1  -> PURPLE-PINK at MAX brightness  (most pressed)
-//     Brightness scales linearly with t; hue/sat walk the 4 stops above.
-//   * MATURITY gate: no key reaches max until it has been pressed >= HM_MATURITY
-//     (10) times. Implemented by flooring the normalize denominator at 10, so
-//     nothing saturates until the hottest key crosses 10, then everything
-//     normalizes against the real max.
-//   * LATCH: once a key reaches full brightness it STAYS full (it does not fade
-//     back as the rolling window evicts its presses). Only the idle animation
-//     dims it. Latch state is per (layer, LED) and persists until power-cycle.
-//   * IDLE animation (drives a global brightness multiplier; never touches hue):
-//       < 500ms since last key      : ACTIVE, full brightness.
-//       500ms .. (TIMEOUT-6s)       : BREATHING, 2s loop, 100% -> 50% -> 100%.
-//       last 6s before TIMEOUT      : PRE-SLEEP -- 2s held at MAX, then a 4s
-//                                     fade to ZERO, hitting 0 exactly as
-//                                     RGB_MATRIX_SLEEP cuts the LEDs at TIMEOUT.
-//     (TIMEOUT = RGB_MATRIX_TIMEOUT, 60s; activity ts synced via SPLIT_ACTIVITY_ENABLE.)
+// BEHAVIOR CONTRACT (operator spec 2026-06-11 rev-14; Sonar Pro consult on the
+// normalization curve, gamma/temporal-dither smoothness, and split counting):
+//   * TWO rolling windows of key-DOWN edges, bucketed per (layer, LED):
+//       SHORT = last HM_SHORT (100) presses  -> the "recently used" map.
+//       LONG  = last HM_LONG  (2000) presses -> the long-term map.
+//     Both updated on every 0->1 matrix edge (same mechanism bongo uses; the
+//     mirrored matrix makes each half see the full matrix, so both build
+//     identical counters and each renders its own 18 LEDs).
+//   * NORMALIZATION (Sonar): t = log(1 + k*u) / log(1 + k), u = c/denom, k=15.
+//     This compresses the low end so a key pressed only a FEW times already
+//     reads clearly while the hottest sits at purple-pink -- giving the bulk of
+//     pressed keys a visible, distinguishable shade (operator: "~80% lit, obvious
+//     which keys get neglected"). denom is the per-layer hottest count CLAMPED to
+//     [HM_DENOM_MIN(35), cap]: the 35 floor makes ~3 presses land in YELLOW from
+//     a cold start, and the cap (100 short / 400 long) lets it "go solid by
+//     50-100 and keep normalizing" as traffic grows.
+//   * COLOR ramp by t in [0,1]: pressed-but-cold -> WHITE, then YELLOW (~t .30),
+//     CYAN (~t .63), PURPLE-PINK at t=1 (most used). Unpressed (count 0) -> OFF,
+//     so neglected keys stay obviously dark. NO permanent latch: the map is live
+//     and rolls (a key cools as it leaves the window).
+//   * IDLE (drives WHICH window + a global fade; never distorts hue):
+//       < HM_ACTIVE_MS (500ms)          : ACTIVE -> render the SHORT (rolling-100) map.
+//       500ms .. (TIMEOUT - 7s)         : oscillate (crossfade) SHORT<->LONG, 4s loop.
+//       last 7s before TIMEOUT          : hold the LONG map and FADE to zero,
+//                                         hitting 0 as RGB_MATRIX_SLEEP cuts LEDs.
+//   * SMOOTHNESS: value goes through a gamma-2.2 LUT (perceptual) plus per-LED
+//     temporal dithering (fractional carry across frames) so low-brightness fades
+//     don't band on the 8-bit ws2812. Target framerate ~38Hz (RGB_MATRIX_LED_FLUSH_LIMIT).
 
 #include QMK_KEYBOARD_H
 #include <stdbool.h>
+#include <math.h>
 
-#define HM_LAYERS   4              // _BASE.._ADJUST
-#define HM_LEDS     RGB_MATRIX_LED_COUNT
-#define HM_WINDOW   2000           // rolling key-DOWN history depth
-#define HM_MATURITY 10             // presses before a key may hit max brightness
+#define HM_LAYERS    4              // _BASE.._ADJUST
+#define HM_LEDS      RGB_MATRIX_LED_COUNT
+#define HM_SHORT     100            // recent-use window depth
+#define HM_LONG      2000           // long-term window depth
+#define HM_DENOM_MIN 35             // denom floor -> ~3 presses == yellow cold
+#define HM_CAP_SHORT 100            // short denom cap (goes solid by ~100)
+#define HM_CAP_LONG  400            // long denom cap
+#define HM_K         15.0f          // log-curve steepness (Sonar)
 
-// Idle-animation timing (ms). Anchored to the RGB sleep timeout.
+// Idle-animation timing (ms). Anchored to the RGB sleep timeout (60s).
 #define HM_ACTIVE_MS   500
-#define HM_BREATHE_MS  2000        // breathing loop period
-#define HM_PRESLEEP_MS 6000        // window before TIMEOUT that the send-off runs
-#define HM_PS_HOLD_MS  2000        // ...held at max...
-#define HM_PS_FADE_MS  4000        // ...then faded to zero (2000 + 4000 = 6000)
+#define HM_OSC_MS      4000         // SHORT<->LONG oscillation loop period
+#define HM_FADEOUT_MS  7000         // pre-sleep fade-to-black window
 
-// Per-(layer, LED) rolling counts and the "reached full" latch.
-static uint16_t hm_count[HM_LAYERS][HM_LEDS];
-static bool     hm_latched[HM_LAYERS][HM_LEDS];
+// Per-(layer, LED) rolling counts for each window.
+static uint16_t hm_short[HM_LAYERS][HM_LEDS];
+static uint16_t hm_long[HM_LAYERS][HM_LEDS];
 
-// Circular history of the last HM_WINDOW presses, each packed (layer<<6 | led).
-// 0xFF == empty slot. led is 0..HM_LEDS-1 (<64) and layer 0..3, so 0xFF never
-// collides with a real entry. Evicting the oldest decrements its bucket.
-static uint8_t  hm_ring[HM_WINDOW];
-static uint16_t hm_ring_head = 0;
-static uint16_t hm_ring_fill = 0;
-static bool     hm_ring_init = false;
+// Circular histories, each packed (layer<<6 | led); 0xFF == empty.
+static uint8_t  hm_ring_s[HM_SHORT];
+static uint8_t  hm_ring_l[HM_LONG];
+static uint16_t hm_head_s = 0, hm_fill_s = 0;
+static uint16_t hm_head_l = 0, hm_fill_l = 0;
+static bool     hm_init = false;
 
 // Previous matrix snapshot for 0->1 edge detection (independent of bongo's).
 static matrix_row_t hm_prev[MATRIX_ROWS];
 
-static void hm_push(uint8_t layer, uint8_t led) {
-    if (hm_ring_fill == HM_WINDOW) {
-        uint8_t old = hm_ring[hm_ring_head];
+// Perceptual gamma LUT + per-LED temporal-dither carry (1/256ths of a level).
+static uint8_t hm_gamma[256];
+static uint8_t hm_carry[HM_LEDS];
+
+static void hm_push_ring(uint8_t *ring, uint16_t depth, uint16_t *head,
+                         uint16_t *fill, uint16_t (*cnt)[HM_LEDS],
+                         uint8_t layer, uint8_t led) {
+    if (*fill == depth) {
+        uint8_t old = ring[*head];
         if (old != 0xFF) {
             uint8_t ol = old >> 6, oe = old & 0x3F;
-            if (ol < HM_LAYERS && oe < HM_LEDS && hm_count[ol][oe]) hm_count[ol][oe]--;
+            if (ol < HM_LAYERS && oe < HM_LEDS && cnt[ol][oe]) cnt[ol][oe]--;
         }
     } else {
-        hm_ring_fill++;
+        (*fill)++;
     }
-    hm_ring[hm_ring_head] = (uint8_t)((layer << 6) | led);
-    hm_ring_head          = (hm_ring_head + 1) % HM_WINDOW;
-    if (hm_count[layer][led] < HM_WINDOW) hm_count[layer][led]++;
+    ring[*head] = (uint8_t)((layer << 6) | led);
+    *head       = (uint16_t)((*head + 1) % depth);
+    if (cnt[layer][led] < depth) cnt[layer][led]++;
 }
 
 void heatmap_record_scan(void) {
-    if (!hm_ring_init) { // one-time: mark all ring slots empty
-        for (uint16_t i = 0; i < HM_WINDOW; i++) hm_ring[i] = 0xFF;
-        hm_ring_init = true;
+    if (!hm_init) {
+        for (uint16_t i = 0; i < HM_SHORT; i++) hm_ring_s[i] = 0xFF;
+        for (uint16_t i = 0; i < HM_LONG; i++)  hm_ring_l[i] = 0xFF;
+        for (uint16_t i = 0; i < 256; i++) {
+            float x = (float)i / 255.0f;
+            hm_gamma[i] = (uint8_t)lroundf(powf(x, 1.0f / 2.2f) * 255.0f);
+        }
+        hm_init = true;
     }
     uint8_t layer = get_highest_layer(layer_state);
     if (layer >= HM_LAYERS) layer = HM_LAYERS - 1;
@@ -97,7 +107,8 @@ void heatmap_record_scan(void) {
             if (!(newly & ((matrix_row_t)1 << c))) continue;
             uint8_t led = g_led_config.matrix_co[r][c];
             if (led == NO_LED || led >= HM_LEDS) continue;
-            hm_push(layer, led);
+            hm_push_ring(hm_ring_s, HM_SHORT, &hm_head_s, &hm_fill_s, hm_short, layer, led);
+            hm_push_ring(hm_ring_l, HM_LONG,  &hm_head_l, &hm_fill_l, hm_long,  layer, led);
         }
     }
 }
@@ -106,84 +117,98 @@ static uint8_t hm_lerp(uint8_t a, uint8_t b, uint8_t frac /*0..255*/) {
     return (uint8_t)(a + (((int16_t)b - (int16_t)a) * frac) / 255);
 }
 
-// Map hotness t (0..255) -> HSV. Hue/sat walk white->yellow->cyan->purple-pink
-// over thirds of t; value rises linearly with t up to `maxv`.
-static hsv_t hm_color(uint8_t t, uint8_t maxv) {
-    // QMK hue space (0..255 == 0..360deg): yellow~43, cyan~128, purple-pink~222.
+// Hottest count on a layer, clamped to [HM_DENOM_MIN, cap].
+static uint16_t hm_denom(uint16_t (*cnt)[HM_LEDS], uint8_t layer, uint16_t cap) {
+    uint16_t mx = 0;
+    for (uint8_t i = 0; i < HM_LEDS; i++) if (cnt[layer][i] > mx) mx = cnt[layer][i];
+    if (mx < HM_DENOM_MIN) mx = HM_DENOM_MIN;
+    if (mx > cap) mx = cap;
+    return mx;
+}
+
+// count c against denom -> hotness t in [0,1] via the log low-end ramp.
+static float hm_norm(uint16_t c, uint16_t denom) {
+    if (c == 0) return 0.0f;
+    float u = (float)c / (float)denom;
+    if (u > 1.0f) u = 1.0f;
+    return logf(1.0f + HM_K * u) / logf(1.0f + HM_K);
+}
+
+// Hotness t (0..1) -> HSV. white->yellow->cyan->purple-pink; value tracks t.
+static hsv_t hm_color(float t, uint8_t maxv) {
+    if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
     uint8_t h, s;
-    if (t <= 85) {                                   // white -> yellow
-        uint8_t f = (uint8_t)((uint16_t)t * 255 / 85);
+    if (t <= 0.30f) {                         // white -> yellow
         h = 43;
-        s = f;                                        // saturation 0 (white) -> 255
-    } else if (t <= 170) {                            // yellow -> cyan
-        uint8_t f = (uint8_t)((uint16_t)(t - 85) * 255 / 85);
+        s = (uint8_t)(t / 0.30f * 255.0f);    // sat 0 (white) -> 255 (yellow)
+    } else if (t <= 0.63f) {                  // yellow -> cyan
+        uint8_t f = (uint8_t)((t - 0.30f) / 0.33f * 255.0f);
         h = hm_lerp(43, 128, f);
         s = 255;
-    } else {                                          // cyan -> purple-pink
-        uint8_t f = (uint8_t)((uint16_t)(t - 170) * 255 / 85);
+    } else {                                  // cyan -> purple-pink
+        uint8_t f = (uint8_t)((t - 0.63f) / 0.37f * 255.0f);
         h = hm_lerp(128, 222, f);
         s = 255;
     }
-    uint8_t v = (uint8_t)((uint16_t)t * maxv / 255);  // brightness tracks t
+    uint8_t v = (uint8_t)(t * (float)maxv);
     return (hsv_t){h, s, v};
 }
 
-// Global brightness multiplier (0..255) for the idle animation. Hue untouched.
-static uint8_t hm_idle_mul(void) {
+// Idle state -> (window-mix alpha 0..255 where 0=SHORT,255=LONG) and a global
+// brightness fade 0..255. Active = pure SHORT at full; mid-idle oscillates
+// SHORT<->LONG; last 7s holds LONG and fades to zero.
+static void hm_idle(uint8_t *mix, uint8_t *fade) {
     uint32_t since = last_input_activity_elapsed();
-    if (since < HM_ACTIVE_MS) return 255; // actively typing -> full
+    if (since < HM_ACTIVE_MS) { *mix = 0; *fade = 255; return; }
 
-    if (since < (uint32_t)RGB_MATRIX_TIMEOUT - HM_PRESLEEP_MS) {
-        // Breathing: triangle 0..255..0 over the loop, applied as 100%..50%..100%.
-        uint32_t phase = timer_read32() % HM_BREATHE_MS;
-        uint32_t half  = HM_BREATHE_MS / 2;
-        uint32_t tri   = phase < half ? (phase * 255 / half)
-                                      : ((HM_BREATHE_MS - phase) * 255 / half);
-        return (uint8_t)(255 - tri / 2); // dip to 50%, never lower; no color change
+    uint32_t fade_start = (uint32_t)RGB_MATRIX_TIMEOUT - HM_FADEOUT_MS;
+    if (since < fade_start) {
+        // Oscillate between the two maps: triangle 0..255..0 over HM_OSC_MS.
+        uint32_t phase = timer_read32() % HM_OSC_MS;
+        uint32_t half  = HM_OSC_MS / 2;
+        *mix  = phase < half ? (uint8_t)(phase * 255 / half)
+                             : (uint8_t)((HM_OSC_MS - phase) * 255 / half);
+        *fade = 255;
+        return;
     }
-
-    if (since < (uint32_t)RGB_MATRIX_TIMEOUT) {
-        // Pre-sleep send-off: hold max, then fade to zero by the timeout.
-        uint32_t into = since - ((uint32_t)RGB_MATRIX_TIMEOUT - HM_PRESLEEP_MS);
-        if (into < HM_PS_HOLD_MS) return 255;
-        uint32_t f = into - HM_PS_HOLD_MS;
-        if (f >= HM_PS_FADE_MS) return 0;
-        return (uint8_t)(255 - (f * 255 / HM_PS_FADE_MS));
+    if (since < (uint32_t)RGB_MATRIX_TIMEOUT) {       // 7s fade to black on LONG map
+        uint32_t into = since - fade_start;
+        *mix  = 255;
+        *fade = (uint8_t)(255 - (into * 255 / HM_FADEOUT_MS));
+        return;
     }
-    return 0; // at/after timeout RGB_MATRIX_SLEEP cuts the LEDs anyway
+    *mix = 255; *fade = 0;
 }
 
 void heatmap_render(uint8_t led_min, uint8_t led_max) {
     uint8_t layer = get_highest_layer(layer_state);
     if (layer >= HM_LAYERS) layer = HM_LAYERS - 1;
 
-    // Hottest count on this layer; floored at HM_MATURITY so nothing saturates
-    // until some key has been pressed >= 10 times ("normalize from there").
-    uint16_t mx = 0;
-    for (uint8_t i = 0; i < HM_LEDS; i++) {
-        if (hm_count[layer][i] > mx) mx = hm_count[layer][i];
-    }
-    uint16_t denom = mx < HM_MATURITY ? HM_MATURITY : mx;
-
-    uint8_t maxv = rgb_matrix_get_val();      // respect the brightness knob
-    uint8_t gmul = hm_idle_mul();
+    uint16_t ds = hm_denom(hm_short, layer, HM_CAP_SHORT);
+    uint16_t dl = hm_denom(hm_long,  layer, HM_CAP_LONG);
+    uint8_t  maxv = rgb_matrix_get_val();     // respect the brightness knob
+    uint8_t  mix, fade;
+    hm_idle(&mix, &fade);
 
     for (uint8_t i = led_min; i < led_max; i++) {
         if (i >= HM_LEDS) continue;
-        uint16_t c = hm_count[layer][i];
-
-        // Unpressed AND never-latched -> fully off.
-        if (c == 0 && !hm_latched[layer][i]) {
+        uint16_t cs = hm_short[layer][i], cl = hm_long[layer][i];
+        if (cs == 0 && cl == 0) {             // never pressed in either window -> off
             rgb_matrix_set_color(i, 0, 0, 0);
             continue;
         }
-        // Latch on reaching the (mature) top; latched keys render full forever.
-        if (mx >= HM_MATURITY && c >= mx) hm_latched[layer][i] = true;
+        // Blend the two windows' hotness by the idle mix factor.
+        float ts = hm_norm(cs, ds), tl = hm_norm(cl, dl);
+        float t  = ts + (tl - ts) * ((float)mix / 255.0f);
 
-        uint8_t t = hm_latched[layer][i] ? 255
-                                         : (uint8_t)((uint32_t)c * 255 / denom);
         hsv_t hsv = hm_color(t, maxv);
-        hsv.v     = (uint8_t)((uint16_t)hsv.v * gmul / 255); // idle animation
+        // Perceptual gamma + global idle fade, then temporal dither the residual
+        // so sub-LSB brightness still shows across frames (smooth low-end fades).
+        uint16_t target = (uint16_t)hm_gamma[hsv.v] * fade;   // 0..255*255
+        uint16_t acc    = target + hm_carry[i];
+        hsv.v           = (uint8_t)(acc >> 8);
+        hm_carry[i]     = (uint8_t)(acc & 0xFF);
+
         rgb_t rgb = hsv_to_rgb(hsv);
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
