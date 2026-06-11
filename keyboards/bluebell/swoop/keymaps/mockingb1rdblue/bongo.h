@@ -13,6 +13,11 @@
 //     left rows (0..3) and right rows (4..7) separately works on either half
 //     (master or slave). A per-half count INCREASE is a press; releases are
 //     ignored.
+//   * EVERY key-down smacks again and a held key NEVER blocks it: each smack
+//     holds the paw DOWN for TAP_DOWN_MS then RAISES (back to prep), so a key
+//     pressed while another is still held interrupts with a fresh raise+smack
+//     instead of freezing the paw down. Pre-rev10 the paw stayed down for as
+//     long as any key was physically held.
 //   * idle/prep/sleep pacing uses the whole-keyboard activity timestamp
 //     (SPLIT_ACTIVITY_ENABLE in config.h syncs it to the slave).
 #pragma once
@@ -20,7 +25,9 @@
 #define IDLE_FRAMES 5
 #define TAP_FRAMES 2
 #define ANIM_FRAME_DURATION 200 // ms per idle frame
-#define TAP_SHOW_MS 150         // how long a smack frame lingers after key-down
+#define TAP_DOWN_MS 70          // paw holds DOWN this long per smack, then RAISES
+                                // (even while other keys are held); short enough
+                                // that a raise is visible between keystrokes
 #define PREP_MS 1000            // paws-up window after the last (global) keystroke
 #define ANIM_SIZE 636           // bytes per frame; the 128x32 buffer clamps at 512
 
@@ -126,15 +133,19 @@ static void render_bongo(void) {
     if (left_down || right_down) {
         // Left half -> left paw (tap[0]); right half -> right paw (tap[1]). If
         // both halves fire in the same scan, the right paw wins (arbitrary
-        // tie-break; simultaneous cross-half key-downs are rare).
+        // tie-break; simultaneous cross-half key-downs are rare). This fires on
+        // EVERY key-down -- a key pressed while another is still held smacks
+        // again (interrupt), it is NOT blocked by the held key.
         current_tap_frame = right_down ? 1 : 0;
         bongo_draw(tap[current_tap_frame]);
         own_tap_timer = timer_read32();
         return;
     }
 
-    // Keep the smack on screen while any key is held / briefly after.
-    if (left_pressed + right_pressed > 0 || timer_elapsed32(own_tap_timer) < TAP_SHOW_MS) {
+    // Hold the paw DOWN only briefly, then RAISE -- even if keys are still held
+    // (no 'pressed > 0' freeze). After TAP_DOWN_MS the paw lifts to prep, so the
+    // next key-down is a visible raise+smack instead of a stuck-down paw.
+    if (timer_elapsed32(own_tap_timer) < TAP_DOWN_MS) {
         return;
     }
     if (since < PREP_MS) {
