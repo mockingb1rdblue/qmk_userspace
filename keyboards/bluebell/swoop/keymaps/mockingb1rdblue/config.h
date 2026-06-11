@@ -31,9 +31,11 @@
 #define RGB_MATRIX_LED_COUNT 36
 #define RGB_MATRIX_SPLIT { 18, 18 }
 #define RGB_MATRIX_MAXIMUM_BRIGHTNESS 150
-// Visible default so first flash obviously lights.
+// Default = the per-layer neon keypress heatmap (custom effect in
+// rgb_matrix_user.inc / heatmap.c). Cycle-left-right kept enabled as a
+// selectable fallback mode.
 #define ENABLE_RGB_MATRIX_CYCLE_LEFT_RIGHT
-#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CYCLE_LEFT_RIGHT
+#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_heatmap_neon
 #define RGB_MATRIX_DEFAULT_VAL 150
 #define RGB_MATRIX_DEFAULT_SPD 100
 // Sleep with the OLEDs: LEDs off after 1 min of no input (and on host suspend).
@@ -56,6 +58,10 @@
 // Sync input-activity timestamps master<->slave so the bongo cat idle/prep/
 // sleep pacing stays aligned on BOTH OLEDs.
 #define SPLIT_ACTIVITY_ENABLE
+
+// Sync the active layer to the slave so the per-layer keypress heatmap
+// (heatmap.c) renders the SAME layer's hot keys on both halves.
+#define SPLIT_LAYER_STATE_ENABLE
 
 // Mirror the master's matrix to the slave so BOTH halves see the FULL matrix
 // (by default the slave only sees its own rows). bongo.h needs this: each OLED

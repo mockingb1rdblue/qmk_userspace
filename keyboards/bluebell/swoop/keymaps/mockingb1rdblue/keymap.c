@@ -140,6 +140,16 @@ led_config_t g_led_config = {
 };
 #endif
 
+#ifdef RGB_MATRIX_ENABLE
+// Feed the per-layer keypress heatmap (heatmap.c). Runs every scan on BOTH
+// halves; the mirrored matrix + synced layer state keep the two sides' counters
+// identical so each renders its own LEDs correctly.
+#    include "heatmap.h"
+void matrix_scan_user(void) {
+    heatmap_record_scan();
+}
+#endif
+
 #ifdef OLED_ENABLE
 // Bongo cat on BOTH OLEDs (no is_keyboard_master() gate; the slave reacts via
 // SPLIT_ACTIVITY_ENABLE in config.h). Frames + render loop live in bongo.h.
