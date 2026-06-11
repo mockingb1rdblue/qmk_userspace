@@ -148,6 +148,17 @@ led_config_t g_led_config = {
 void matrix_scan_user(void) {
     heatmap_record_scan();
 }
+
+// Pin the heatmap as the boot RGB mode. RGB_MATRIX_DEFAULT_MODE (config.h) only
+// seeds the EEPROM when it is blank/reset, so a board previously flashed with a
+// different effect keeps that STALE mode forever. Force the heatmap into the live
+// (RAM) state on every boot with the _noeeprom setters: this overrides stale
+// EEPROM without burning a write cycle, and because the mode is RAM-resident it
+// survives RGB_MATRIX_SLEEP (which only blanks the LEDs) -> resumes on wake.
+void keyboard_post_init_user(void) {
+    rgb_matrix_enable_noeeprom();
+    rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_heatmap_neon);
+}
 #endif
 
 #ifdef OLED_ENABLE
