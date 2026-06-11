@@ -22,10 +22,13 @@
 
 static uint32_t anim_timer         = 0;
 static uint8_t  current_idle_frame = 0;
-// Init to 1 so the FIRST smack after idle plays tap[0] ((1+1)%2). With the
-// one-horizontal-flip-per-half transform (see oled_init_user), tap[0] reads as
-// the LEFT paw on both halves; subsequent smacks alternate left/right.
-static uint8_t  current_tap_frame  = 1;
+// Tap frames are a paw pair: tap[1] = right paw, tap[0] = left paw. Orientation
+// (rotation/mirror) does NOT change which paw a frame depicts (operator-
+// confirmed). The leading paw is therefore chosen by FRAME INDEX, per half, in
+// render_bongo(): the RIGHT half leads tap[1] (right paw, original behavior),
+// the LEFT half leads tap[0] (left paw). This alternator toggles 0<->1 each
+// smack; it inits to 0 so the first toggle lands on 1.
+static uint8_t  current_tap_frame  = 0;
 static uint8_t  prev_own_pressed   = 0;
 static uint32_t own_tap_timer      = 0;
 
@@ -107,8 +110,12 @@ static void render_bongo(void) {
     // Key-DOWN on this half: pressed-count increased. Releases only lower it.
     uint8_t pressed = bongo_own_pressed();
     if (pressed > prev_own_pressed) {
-        current_tap_frame = (current_tap_frame + 1) % TAP_FRAMES;
-        bongo_draw(tap[current_tap_frame]);
+        current_tap_frame ^= 1; // alternate paw each smack (TAP_FRAMES == 2)
+        // Per-half leading paw: the RIGHT half plays the alternator as-is
+        // (leads tap[1] = right paw); the LEFT half plays it inverted (leads
+        // tap[0] = left paw). Orientation/mirror do not affect the paw.
+        uint8_t frame = is_keyboard_left() ? (current_tap_frame ^ 1) : current_tap_frame;
+        bongo_draw(tap[frame]);
         own_tap_timer = timer_read32();
         prev_own_pressed = pressed;
         return;

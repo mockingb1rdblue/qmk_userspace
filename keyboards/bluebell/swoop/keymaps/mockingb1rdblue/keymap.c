@@ -145,15 +145,15 @@ led_config_t g_led_config = {
 // SPLIT_ACTIVITY_ENABLE in config.h). Frames + render loop live in bongo.h.
 #include "bongo.h"
 
-// Split halves are the same PCB flipped, so their OLEDs are mounted 180deg
-// apart: the RIGHT reads correctly at OLED_ROTATION_180, the LEFT at
-// OLED_ROTATION_0. The left art is ALSO mirrored horizontally in bongo_draw().
-// Net per half: exactly one horizontal flip (left from the SW mirror, right
-// from the 180 rotation), so a given tap frame shows the SAME paw on both.
-// NOTE: do not put OLED_ROTATION_180 on the left and ALSO mirror it -- the two
-// horizontal flips cancel and you get an upside-down (vertical-flip) image.
+// Both OLEDs read upright at OLED_ROTATION_180 (the art is authored for that
+// orientation; confirmed correct on the right half). The LEFT art is then
+// mirrored horizontally in bongo_draw() so the two cats face each other.
+// Verified by rendering the frames: ROT180 + SW-mirror = upright + mirrored;
+// ROT0 + mirror comes out upside-down (the earlier mistake).
+// IMPORTANT: orientation does NOT change which PAW a tap frame depicts -- the
+// leading paw is chosen per half by frame index in bongo.h, not here.
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
-    return is_keyboard_left() ? OLED_ROTATION_0 : OLED_ROTATION_180;
+    return OLED_ROTATION_180;
 }
 
 bool oled_task_user(void) {
