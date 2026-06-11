@@ -53,8 +53,14 @@
 #define I2C1_SCL_PIN D0
 #define OLED_TIMEOUT 60000
 
-// Sync input-activity timestamps master<->slave so the bongo cat smacks on
-// EVERY keystroke on BOTH OLEDs (the slave never sees the other half's key
-// events; last_input_activity_time() is the only per-keystroke signal QMK
-// syncs across the split).
+// Sync input-activity timestamps master<->slave so the bongo cat idle/prep/
+// sleep pacing stays aligned on BOTH OLEDs.
 #define SPLIT_ACTIVITY_ENABLE
+
+// Mirror the master's matrix to the slave so BOTH halves see the FULL matrix
+// (by default the slave only sees its own rows). bongo.h needs this: each OLED
+// must tell which physical half a key-down landed on to pick the paw (left
+// half -> left paw, right half -> right paw, identically on both displays).
+// QMK copies PUT_MASTER_MATRIX into the slave's matrix every split scan, so
+// matrix_get_row() returns all rows on both sides.
+#define SPLIT_TRANSPORT_MIRROR

@@ -3,12 +3,16 @@
 //
 // Bongo cat OLED animation (128x32), frame bitmaps from nwii/oledbongocat
 // (GPL-2.0, https://github.com/nwii/oledbongocat). KEYSTROKE-REACTIVE,
-// PER-HALF fork:
-//   * each half's cat smacks ONLY on key-DOWN events of its own physical
-//     half, detected by popcounting that half's own matrix rows (left rows
-//     0..3, right rows 4..7 -- split_common stores each half at a fixed row
-//     offset on both sides, so this works whether the half is master or
-//     slave; a count INCREASE is a press, releases are ignored);
+// BOTH-HALVES-TRACK-BOTH-KEYBOARDS, paw chosen by struck half:
+//   * BOTH OLEDs react to EVERY key-DOWN anywhere on the keyboard, and BOTH
+//     pick the SAME paw: a left-half key-down smacks the LEFT paw (tap[0]),
+//     a right-half key-down smacks the RIGHT paw (tap[1]). The paw tracks the
+//     physical half struck, NOT which display this is.
+//   * This needs the full matrix on both sides: SPLIT_TRANSPORT_MIRROR
+//     (config.h) mirrors the master's rows to the slave, so popcounting the
+//     left rows (0..3) and right rows (4..7) separately works on either half
+//     (master or slave). A per-half count INCREASE is a press; releases are
+//     ignored.
 //   * idle/prep/sleep pacing uses the whole-keyboard activity timestamp
 //     (SPLIT_ACTIVITY_ENABLE in config.h syncs it to the slave).
 #pragma once
@@ -22,14 +26,14 @@
 
 static uint32_t anim_timer         = 0;
 static uint8_t  current_idle_frame = 0;
-// Tap frames are a paw pair: tap[1] = right paw, tap[0] = left paw. Orientation
+// Tap frames are a paw pair: tap[0] = left paw, tap[1] = right paw. Orientation
 // (rotation/mirror) does NOT change which paw a frame depicts (operator-
-// confirmed). The leading paw is therefore chosen by FRAME INDEX, per half, in
-// render_bongo(): the RIGHT half leads tap[1] (right paw, original behavior),
-// the LEFT half leads tap[0] (left paw). This alternator toggles 0<->1 each
-// smack; it inits to 0 so the first toggle lands on 1.
+// confirmed). The paw is chosen by WHICH PHYSICAL HALF was struck, not by which
+// display: a left-half key-down draws tap[0], a right-half key-down draws
+// tap[1] -- identically on both OLEDs.
 static uint8_t  current_tap_frame  = 0;
-static uint8_t  prev_own_pressed   = 0;
+static uint8_t  prev_left_pressed  = 0;
+static uint8_t  prev_right_pressed = 0;
 static uint32_t own_tap_timer      = 0;
 
 static const char PROGMEM idle[IDLE_FRAMES][ANIM_SIZE] = {{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x40, 0x40, 0x40, 0x20, 0x20, 0x20, 0x20, 0x20, 0x18, 0x04, 0x02, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x20, 0x40, 0x40, 0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -88,10 +92,12 @@ static void bongo_draw(const char *frame) {
     }
 }
 
-// Count keys currently held on THIS physical half only.
-static uint8_t bongo_own_pressed(void) {
-    uint8_t start = is_keyboard_left() ? 0 : MATRIX_ROWS / 2;
-    uint8_t n     = 0;
+// Count keys currently held on one half. `start` selects the half: left =
+// rows [0, MATRIX_ROWS/2), right = rows [MATRIX_ROWS/2, MATRIX_ROWS). Thanks to
+// SPLIT_TRANSPORT_MIRROR both halves see the full matrix, so this returns the
+// real per-half count whether this code runs on the master or the slave.
+static uint8_t bongo_half_pressed(uint8_t start) {
+    uint8_t n = 0;
     for (uint8_t r = start; r < start + MATRIX_ROWS / 2; r++) {
         n += __builtin_popcount(matrix_get_row(r));
     }
@@ -102,28 +108,33 @@ static void render_bongo(void) {
     uint32_t since = last_input_activity_elapsed();
     if (since > OLED_TIMEOUT) {
         oled_off();
-        prev_own_pressed = bongo_own_pressed();
+        prev_left_pressed  = bongo_half_pressed(0);
+        prev_right_pressed = bongo_half_pressed(MATRIX_ROWS / 2);
         return;
     }
     oled_on();
 
-    // Key-DOWN on this half: pressed-count increased. Releases only lower it.
-    uint8_t pressed = bongo_own_pressed();
-    if (pressed > prev_own_pressed) {
-        current_tap_frame ^= 1; // alternate paw each smack (TAP_FRAMES == 2)
-        // Per-half leading paw: the RIGHT half plays the alternator as-is
-        // (leads tap[1] = right paw); the LEFT half plays it inverted (leads
-        // tap[0] = left paw). Orientation/mirror do not affect the paw.
-        uint8_t frame = is_keyboard_left() ? (current_tap_frame ^ 1) : current_tap_frame;
-        bongo_draw(tap[frame]);
+    // Key-DOWN anywhere: a half's pressed-count increased. Releases only lower
+    // it. The struck half picks the paw, identically on BOTH OLEDs.
+    uint8_t left_pressed  = bongo_half_pressed(0);
+    uint8_t right_pressed = bongo_half_pressed(MATRIX_ROWS / 2);
+    bool    left_down     = left_pressed  > prev_left_pressed;
+    bool    right_down    = right_pressed > prev_right_pressed;
+    prev_left_pressed  = left_pressed;
+    prev_right_pressed = right_pressed;
+
+    if (left_down || right_down) {
+        // Left half -> left paw (tap[0]); right half -> right paw (tap[1]). If
+        // both halves fire in the same scan, the right paw wins (arbitrary
+        // tie-break; simultaneous cross-half key-downs are rare).
+        current_tap_frame = right_down ? 1 : 0;
+        bongo_draw(tap[current_tap_frame]);
         own_tap_timer = timer_read32();
-        prev_own_pressed = pressed;
         return;
     }
-    prev_own_pressed = pressed;
 
-    // Keep the smack on screen while keys are held here / briefly after.
-    if (pressed > 0 || timer_elapsed32(own_tap_timer) < TAP_SHOW_MS) {
+    // Keep the smack on screen while any key is held / briefly after.
+    if (left_pressed + right_pressed > 0 || timer_elapsed32(own_tap_timer) < TAP_SHOW_MS) {
         return;
     }
     if (since < PREP_MS) {
