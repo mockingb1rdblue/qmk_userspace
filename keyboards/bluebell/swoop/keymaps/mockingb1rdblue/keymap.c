@@ -125,11 +125,15 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 //   R-M   : the test report flagged "m->comma AMBIGUOUS".  Most consistent
 //            chain reading assigns COMM=24 (from unambiguous j->comma) and
 //            M=26 (from unambiguous l->m).  Re-test if M still looks wrong.
-//   R-QUOT: QUOT never appeared as a "lit under" target; assigned NO_LED.
+//   R-QUOT: FIX F -- QUOT=33 (lit when R-encoder pushed; LED sits under ').
 //   R-DOT : DOT never appeared as "lit under"; assigned chain 29 by
 //            elimination (last unaccounted right-half chain position).
-//   WBAK/WFWD (encoder pushes): not pressed during test; kept at indices
-//            15/33 (no data to remap).
+//   WBAK/WFWD (encoder pushes): FIX F (2026-06-12) -- operator pressed both
+//            encoders; index 15 lit under A, index 33 lit under '. Encoders have
+//            NO LED, so the pushes are NO_LED and those indices belong to the
+//            outer pinky-home keys: A=15, QUOT=33. This corrects FIX E (which
+//            wrongly called A/' "dead hardware"; they are 17 real LEDs/half,
+//            verified on rainbow -- the indices were just on the wrong cells).
 //
 // position[] is reordered to match the physical chain order so that
 // distance-based effects compute correct spatial distances.
@@ -138,12 +142,12 @@ led_config_t g_led_config = {
         // left half  (row x col -> LED chain index; NO_LED = 255)
         // Row 0: Q   W   E   R   T
         {  16,  11,  10,   4,   3 },
-        // Row 1: A(NO_LED)  S    D    F    G
-        { NO_LED,  12,   9,   5,   2 },
+        // Row 1: A   S    D    F    G   (FIX F: A=15, the LED that lit on L-encoder push)
+        {  15,  12,   9,   5,   2 },
         // Row 2: Z   X   C   V   B
         {  14,  13,   8,   6,   1 },
-        // Row 3: (NO_LED x2)  WBAK CTRL SPC
-        { NO_LED, NO_LED,  15,   7,   0 },
+        // Row 3: (NO_LED x2)  WBAK CTRL SPC  (FIX F: WBAK=encoder push, no LED)
+        { NO_LED, NO_LED, NO_LED,   7,   0 },
         // right half
         // FIX D (2026-06-12): direct from hardware press-to-light, full right
         // capture (operator). The mirror guess (FIX C) had the 3x5 columns
@@ -154,17 +158,17 @@ led_config_t g_led_config = {
         // not covering any observed 3x5 position), and QUOT has a real LED (20).
         // Row 4: Y   U   I   O   P
         {  34,  29,  28,  22,  21 },
-        // Row 5: H    J    K    L   QUOT(NO_LED)
+        // Row 5: H    J    K    L   QUOT  (FIX F: QUOT=33, the LED that lit on R-encoder push)
         // FIX E (2026-06-12): outer pinky-home (' right / A left) has NO working
         // LED on either half -- both halves drive 17 LEDs, not 18. Same physical
         // position is dark on both, the signature of a hardware gap (not a map
         // slip). ' -> NO_LED mirrors left A=NO_LED; index 20 (the dead/absent LED
         // at that spot) is now unused. H stays 35 (a real LED, confirmed lit).
-        {  35,  30,  27,  23, NO_LED },
+        {  35,  30,  27,  23,  33 },
         // Row 6: N   M   ,   .   /
         {  32,  31,  26,  24,  19 },
-        // Row 7: (NO_LED x2)  WFWD LGUI HOME
-        { NO_LED, NO_LED,  33,  25,  18 },
+        // Row 7: (NO_LED x2)  WFWD LGUI HOME  (FIX F: WFWD=encoder push, no LED)
+        { NO_LED, NO_LED, NO_LED,  25,  18 },
     },
     {
         // Physical (x,y) of each chain position (index order = WS2812 chain order).
@@ -172,18 +176,18 @@ led_config_t g_led_config = {
         //  0=SPC  1=B    2=G    3=T    4=R    5=F    6=V    7=CTRL
         {  96,  64 }, {  75,  40 }, {  75,  22 }, {  75,   4 },
         {  56,   2 }, {  56,  20 }, {  56,  38 }, {  75,  60 },
-        //  8=C    9=D   10=E   11=W   12=S   13=X   14=Z   15=WBAK
+        //  8=C    9=D   10=E   11=W   12=S   13=X   14=Z   15=A
         {  37,  35 }, {  37,  18 }, {  37,   0 }, {  19,   2 },
-        {  19,  20 }, {  19,  38 }, {   0,  42 }, {  54,  57 },
-        // 16=Q   17=A(phantom)
+        {  19,  20 }, {  19,  38 }, {   0,  42 }, {   0,  24 },
+        // 16=Q   17=phantom (declared 18th LED, no physical LED)
         {   0,   7 }, {   0,  24 },
         // Right chain 18-35 (true physical position per index, from hardware):
-        // 18=HOME 19=SLSH 20=QUOT 21=P    22=O    23=L    24=DOT  25=LGUI
+        // 18=HOME 19=SLSH 20=phantom 21=P  22=O    23=L    24=DOT  25=LGUI
         { 128,  64 }, { 224,  42 }, { 224,  24 }, { 224,   7 },
         { 205,   2 }, { 205,  20 }, { 205,  38 }, { 149,  60 },
-        // 26=COMM 27=K    28=I    29=U    30=J    31=M    32=N    33=WFWD
+        // 26=COMM 27=K    28=I    29=U    30=J    31=M    32=N    33=QUOT
         { 187,  35 }, { 187,  18 }, { 187,   0 }, { 168,   2 },
-        { 168,  20 }, { 168,  38 }, { 149,  40 }, { 170,  57 },
+        { 168,  20 }, { 168,  38 }, { 149,  40 }, { 224,  24 },
         // 34=Y   35=H
         { 149,   4 }, { 149,  22 },
     },
