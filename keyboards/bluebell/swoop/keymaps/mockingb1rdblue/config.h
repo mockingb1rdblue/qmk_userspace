@@ -23,6 +23,36 @@
 #define COMBO_TERM 40
 
 // ===========================================================================
+// Encoder: reversal-swallowed-detent fix (2026-06-12).
+//
+// ROOT CAUSE (encoder_quadrature.c lines 172-195):
+//   encoder_pulses[i] += encoder_LUT[state & 0xF]  -- accumulates quadrature steps.
+//   On fire the accumulator is reset via `encoder_pulses[i] %= resolution` (line 191).
+//   With default ENCODER_RESOLUTION=4 this always yields 0 after a clean fire.
+//   On direction reversal the accumulator starts from 0 and must accumulate a full
+//   resolution (4 pulses) in the new direction before the next event fires.  A typical
+//   mechanical detent produces ~2 LUT pulses, so one full detent is silently consumed
+//   building the accumulator back up -- the "first notch after reversal does nothing".
+//
+// FIX: ENCODER_DEFAULT_POS selects the alternate branch (lines 174-195).
+//   In this mode the driver fires as soon as pulses >= 1 or <= -1 AND resets to 0
+//   (not %= resolution), which means a direction reversal fires on the very first
+//   LUT step in the new direction.  The detent-position check `(state & 0x3) ==
+//   ENCODER_DEFAULT_POS` also re-fires any accumulated partial count whenever the
+//   shaft returns to its resting position, eliminating residual accumulator drift.
+//   Value 0x3 = both pins HIGH = the standard at-rest state for most EC11 encoders.
+//
+// WHY THIS WORKS WITH ENCODER_MAP_ENABLE:
+//   encoder_map is driven by encoder_handle_queue() in encoder.c, which calls
+//   action_exec() on queued events.  ENCODER_DEFAULT_POS still calls
+//   encoder_queue_event() at lines 181/189 -- the identical path -- so the map
+//   fires with exactly the same mechanism as without the flag.
+//
+// Config-only fix; no core patch, no keymap shim, no submodule edit.
+// ===========================================================================
+#define ENCODER_DEFAULT_POS 0x3
+
+// ===========================================================================
 // RGB matrix: per-key ws2812 on D3/GP0, 36 LEDs (split 18/18).
 // ===========================================================================
 // ws2812.pin (D3/GP0) comes from keyboard.json; the vendor (PIO) driver needs a
