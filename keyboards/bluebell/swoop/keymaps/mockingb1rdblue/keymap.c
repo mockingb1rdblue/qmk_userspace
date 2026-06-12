@@ -145,14 +145,24 @@ led_config_t g_led_config = {
         // Row 3: (NO_LED x2)  WBAK CTRL SPC
         { NO_LED, NO_LED,  15,   7,   0 },
         // right half
+        // FIX C (2026-06-12): the press-to-light RIGHT test data was corrupted
+        // (doc flagged m/dot/quot ambiguous); its inversion was self-consistent
+        // but scrambled on hardware -- only LGUI(25) lit correctly. The halves
+        // are mirror-identical PCBs, so the right WS2812 chain is the LEFT chain
+        // mirrored L<->R. This block mirrors the proven-good left map
+        // (Q<->P W<->O E<->I R<->U T<->Y A<->QUOT S<->L D<->K F<->J G<->H
+        //  Z<->SLSH X<->DOT C<->COMM V<->M B<->N WBAK<->WFWD CTRL<->LGUI SPC<->HOME).
+        // Corroboration: this derivation independently yields LGUI=25, the one
+        // right LED confirmed correct on hardware. QUOT is the phantom (mirror
+        // of left's A=NO_LED); right index 35 is the unused phantom position.
         // Row 4: Y   U   I   O   P
-        {  19,  18,  32,  31,  34 },
+        {  21,  22,  28,  29,  34 },
         // Row 5: H    J    K    L   QUOT(NO_LED)
-        {  20,  27,  23,  30, NO_LED },
+        {  20,  23,  27,  30, NO_LED },
         // Row 6: N   M   ,   .   /
-        {  21,  26,  24,  29,  28 },
+        {  19,  24,  26,  31,  32 },
         // Row 7: (NO_LED x2)  WFWD LGUI HOME
-        { NO_LED, NO_LED,  33,  25,  22 },
+        { NO_LED, NO_LED,  33,  25,  18 },
     },
     {
         // Physical (x,y) of each chain position (index order = WS2812 chain order).
@@ -165,15 +175,15 @@ led_config_t g_led_config = {
         {  19,  20 }, {  19,  38 }, {   0,  42 }, {  54,  57 },
         // 16=Q   17=A(phantom)
         {   0,   7 }, {   0,  24 },
-        // Right chain 18-35:
-        // 18=U   19=Y   20=H   21=N   22=HOME 23=K   24=,   25=LGUI
-        { 205,   2 }, { 224,   7 }, { 224,  24 }, { 224,  42 },
-        { 128,  64 }, { 187,  18 }, { 187,  35 }, { 149,  60 },
-        // 26=M   27=J   28=/   29=.   30=L   31=O   32=I   33=WFWD
-        { 205,  38 }, { 205,  20 }, { 149,  40 }, { 168,  38 },
-        { 168,  20 }, { 168,   2 }, { 187,   0 }, { 170,  57 },
+        // Right chain 18-35 (mirror of left chain: x' = 224 - x, y unchanged):
+        // 18=HOME 19=N    20=H    21=Y    22=U    23=J    24=M    25=LGUI
+        { 128,  64 }, { 149,  40 }, { 149,  22 }, { 149,   4 },
+        { 168,   2 }, { 168,  20 }, { 168,  38 }, { 149,  60 },
+        // 26=COMM 27=K    28=I    29=O    30=L    31=DOT  32=SLSH 33=WFWD
+        { 187,  35 }, { 187,  18 }, { 187,   0 }, { 205,   2 },
+        { 205,  20 }, { 205,  38 }, { 224,  42 }, { 170,  57 },
         // 34=P   35=QUOT(phantom)
-        { 149,   4 }, { 149,  22 },
+        { 224,   7 }, { 224,  24 },
     },
     {
         // flags: all per-key
