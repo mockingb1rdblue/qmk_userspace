@@ -158,13 +158,16 @@ led_config_t g_led_config = {
         // not covering any observed 3x5 position), and QUOT has a real LED (20).
         // Row 4: Y   U   I   O   P
         {  34,  29,  28,  22,  21 },
-        // Row 5: H    J    K    L   QUOT  (FIX F: QUOT=33, the LED that lit on R-encoder push)
+        // Row 5 cols 0..4 are PHYSICALLY  QUOT L K J H  (right half matrix cols are
+        // reversed vs physical; keyboard.json: [5,0]=' outer pinky x12, [5,4]=H inner x8).
+        // FIX G (2026-06-12): QUOT(['],[5,0])=33 (LED under '); H([5,4])=35. FIX F had
+        // these two transposed because the old comment mislabeled the columns H..QUOT.
         // FIX E (2026-06-12): outer pinky-home (' right / A left) has NO working
         // LED on either half -- both halves drive 17 LEDs, not 18. Same physical
         // position is dark on both, the signature of a hardware gap (not a map
         // slip). ' -> NO_LED mirrors left A=NO_LED; index 20 (the dead/absent LED
         // at that spot) is now unused. H stays 35 (a real LED, confirmed lit).
-        {  35,  30,  27,  23,  33 },
+        {  33,  30,  27,  23,  35 },
         // Row 6: N   M   ,   .   /
         {  32,  31,  26,  24,  19 },
         // Row 7: (NO_LED x2)  WFWD LGUI HOME  (FIX F: WFWD=encoder push, no LED)
