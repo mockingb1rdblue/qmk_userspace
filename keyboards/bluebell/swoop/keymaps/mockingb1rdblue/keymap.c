@@ -107,30 +107,73 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 // keyboard.json layout coords into rgb_matrix space (x 0-224, y 0-64).
 // CAVEAT: the vendor PCB's true LED chain order is unknown; if effects look
 // scrambled on hardware, the index assignment here is what to remap.
+// FIX A (2026-06-12): corrected per-key LED-chain index mapping derived from
+// hardware press-to-light test (custom/led-map-test-2026-06-11.md).
+//
+// The physical WS2812 strip was wired in a chain order that does NOT match
+// the row-major matrix order assumed before.  The test revealed the full
+// mis-permutation; the matrix_co below is the deterministic inversion of that
+// permutation (rule: new_index(key) = old_index(key_that_previously_lit_key)).
+//
+// FLAGS / AMBIGUOUS CELLS:
+//   L-R/T : r/t are a 2-element swap; both corrected (R=4, T=3).
+//   L-A   : 'a' never appeared as a "lit under" target in the test so no chain
+//            position physically under A; assigned NO_LED (phantom).
+//   L-SPC : was phantom (old index 17, lit nothing).  After inversion,
+//            SPC=0 (chain 0 physically under space, confirmed by Q->space).
+//   R-Y/U : y/u are a 2-element swap; both corrected (Y=19, U=18).
+//   R-M   : the test report flagged "m->comma AMBIGUOUS".  Most consistent
+//            chain reading assigns COMM=24 (from unambiguous j->comma) and
+//            M=26 (from unambiguous l->m).  Re-test if M still looks wrong.
+//   R-QUOT: QUOT never appeared as a "lit under" target; assigned NO_LED.
+//   R-DOT : DOT never appeared as "lit under"; assigned chain 29 by
+//            elimination (last unaccounted right-half chain position).
+//   WBAK/WFWD (encoder pushes): not pressed during test; kept at indices
+//            15/33 (no data to remap).
+//
+// position[] is reordered to match the physical chain order so that
+// distance-based effects compute correct spatial distances.
 led_config_t g_led_config = {
     {
-        // left half
-        {  0,  1,  2,  3,  4 },
-        {  5,  6,  7,  8,  9 },
-        { 10, 11, 12, 13, 14 },
-        { NO_LED, NO_LED, 15, 16, 17 },
+        // left half  (row x col -> LED chain index; NO_LED = 255)
+        // Row 0: Q   W   E   R   T
+        {  16,  11,  10,   4,   3 },
+        // Row 1: A(NO_LED)  S    D    F    G
+        { NO_LED,  12,   9,   5,   2 },
+        // Row 2: Z   X   C   V   B
+        {  14,  13,   8,   6,   1 },
+        // Row 3: (NO_LED x2)  WBAK CTRL SPC
+        { NO_LED, NO_LED,  15,   7,   0 },
         // right half
-        { 18, 19, 20, 21, 22 },
-        { 23, 24, 25, 26, 27 },
-        { 28, 29, 30, 31, 32 },
-        { NO_LED, NO_LED, 33, 34, 35 },
+        // Row 4: Y   U   I   O   P
+        {  19,  18,  32,  31,  34 },
+        // Row 5: H    J    K    L   QUOT(NO_LED)
+        {  20,  27,  23,  30, NO_LED },
+        // Row 6: N   M   ,   .   /
+        {  21,  26,  24,  29,  28 },
+        // Row 7: (NO_LED x2)  WFWD LGUI HOME
+        { NO_LED, NO_LED,  33,  25,  22 },
     },
     {
-        // left half positions
-        {   0,   7 }, {  19,   2 }, {  37,   0 }, {  56,   2 }, {  75,   4 },
-        {   0,  24 }, {  19,  20 }, {  37,  18 }, {  56,  20 }, {  75,  22 },
-        {   0,  42 }, {  19,  38 }, {  37,  35 }, {  56,  38 }, {  75,  40 },
-        {  54,  57 }, {  75,  60 }, {  96,  64 },
-        // right half positions
-        { 224,   7 }, { 205,   2 }, { 187,   0 }, { 168,   2 }, { 149,   4 },
-        { 224,  24 }, { 205,  20 }, { 187,  18 }, { 168,  20 }, { 149,  22 },
-        { 224,  42 }, { 205,  38 }, { 187,  35 }, { 168,  38 }, { 149,  40 },
-        { 170,  57 }, { 149,  60 }, { 128,  64 },
+        // Physical (x,y) of each chain position (index order = WS2812 chain order).
+        // Left chain 0-17:
+        //  0=SPC  1=B    2=G    3=T    4=R    5=F    6=V    7=CTRL
+        {  96,  64 }, {  75,  40 }, {  75,  22 }, {  75,   4 },
+        {  56,   2 }, {  56,  20 }, {  56,  38 }, {  75,  60 },
+        //  8=C    9=D   10=E   11=W   12=S   13=X   14=Z   15=WBAK
+        {  37,  35 }, {  37,  18 }, {  37,   0 }, {  19,   2 },
+        {  19,  20 }, {  19,  38 }, {   0,  42 }, {  54,  57 },
+        // 16=Q   17=A(phantom)
+        {   0,   7 }, {   0,  24 },
+        // Right chain 18-35:
+        // 18=U   19=Y   20=H   21=N   22=HOME 23=K   24=,   25=LGUI
+        { 205,   2 }, { 224,   7 }, { 224,  24 }, { 224,  42 },
+        { 128,  64 }, { 187,  18 }, { 187,  35 }, { 149,  60 },
+        // 26=M   27=J   28=/   29=.   30=L   31=O   32=I   33=WFWD
+        { 205,  38 }, { 205,  20 }, { 149,  40 }, { 168,  38 },
+        { 168,  20 }, { 168,   2 }, { 187,   0 }, { 170,  57 },
+        // 34=P   35=QUOT(phantom)
+        { 149,   4 }, { 149,  22 },
     },
     {
         // flags: all per-key
@@ -143,12 +186,30 @@ led_config_t g_led_config = {
 #ifdef RGB_MATRIX_ENABLE
 // Feed BOTH custom RGB effects' key-DOWN trackers (ledmap.c = boot mapping
 // diagnostic; heatmap.c = selectable heatmap). Each keeps its OWN previous-scan
-// snapshot, so feeding both every scan is correct and independent. Runs on BOTH
-// halves; the mirrored matrix + synced layer state keep the two sides identical
-// so each renders its own LEDs correctly regardless of which mode is active.
+// snapshot, so feeding both every scan is correct and independent.
+//
+// FIX B (2026-06-12): slave-half dark regression.
+// Root cause: in QMK split, matrix_post_scan() calls matrix_scan_kb() (which
+// reaches matrix_scan_user) ONLY on the master.  On the slave it calls
+// matrix_slave_scan_kb() -> matrix_slave_scan_user() instead.  Without an
+// override here, the slave's scan functions were never called, so hm_short /
+// hm_long / lm_hit stayed all-zero on the slave side.  The render functions
+// (heatmap_render / ledmap_render) DO run on both halves (rgb_matrix_task is
+// unconditional) and RGB_MATRIX_SPLIT + USE_LIMITS correctly bounds them to
+// each half's LED range, but they rendered nothing because the counters/timers
+// were always zero.  Built-in effects were unaffected because they don't depend
+// on these user-managed arrays.
+// Fix: mirror matrix_scan_user in matrix_slave_scan_user so both codepaths
+// populate the scan state.  SPLIT_TRANSPORT_MIRROR ensures the slave's
+// matrix_get_row() returns the full mirrored matrix by the time the slave
+// scan hook fires, so both halves build identical counters.
 #    include "ledmap.h"
 #    include "heatmap.h"
 void matrix_scan_user(void) {
+    ledmap_record_scan();
+    heatmap_record_scan();
+}
+void matrix_slave_scan_user(void) {
     ledmap_record_scan();
     heatmap_record_scan();
 }
