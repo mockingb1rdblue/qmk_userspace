@@ -13,8 +13,8 @@
 //
 // Layer mapping (enum alias -> operator reviung34 layer index):
 //   _BASE   -> [0] alpha/base
-//   _LOWER  -> [1] nav + numpad + redo  (edit-oriented; left encoder = edit)
-//   _RAISE  -> [2] symbols + page-nav   (right encoder = page nav)
+//   _LOWER  -> [1] nav + numpad         (right encoder = page nav)
+//   _RAISE  -> [2] symbols + edit       (left encoder = edit)
 //   _ADJUST -> [3] function row
 //
 // Hardware ground truth (probe run 2026-06-09, see README "CONFIRMED HARDWARE FACTS"):
@@ -62,7 +62,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         KC_1,       KC_2,    KC_3,    KC_4,        KC_5,           KC_6,    KC_7, KC_8, KC_9, KC_0,
         KC_UP,      KC_LEFT, KC_DOWN, KC_RGHT,     LCTL(KC_Y),     KC_EQL,  KC_4, KC_5, KC_6, KC_PPLS,
         LSFT(KC_Z), KC_NO,   KC_NO,   MO(_ADJUST), KC_TRNS,        KC_UNDS, KC_1, KC_2, KC_3, KC_PMNS,
-                 C(KC_Y), KC_TRNS, KC_TRNS,                KC_END, KC_0, KC_TRNS
+                 KC_TRNS, KC_TRNS, KC_TRNS,                KC_END, KC_0, KC_TRNS
     ),
 
     // [2] symbols + page-nav. MO(3) on the right inner thumb (was reviung 2u-right).
@@ -70,7 +70,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         KC_EXLM, KC_AT, KC_HASH, KC_DLR,      KC_PERC,           KC_CIRC, KC_AMPR, KC_ASTR, KC_LPRN, KC_RPRN,
         KC_PGUP, KC_NO, KC_PGDN, KC_NO,       KC_NO,             KC_EQL,  KC_MINS, KC_NO,   KC_LBRC, KC_RBRC,
         KC_LSFT, KC_NO, KC_NO,   TG(_ADJUST), KC_TRNS,           KC_UNDS, KC_PLUS, KC_NO,   KC_LCBR, KC_RCBR,
-                 KC_TRNS, KC_TRNS, MO(_ADJUST),          KC_TRNS, KC_TRNS, KC_TRNS
+                 C(KC_Y), KC_TRNS, MO(_ADJUST),          KC_TRNS, KC_TRNS, KC_TRNS
     ),
 
     // [3] function row.
@@ -87,15 +87,15 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 // 1 = right; ENCODER_CCW_CW(ccw, cw)). Designated initializers place each layer's
 // row at its enum index.
 //   _BASE  L: word-jump (Ctrl+Left/Right)   R: mousewheel scroll
-//   _LOWER L: edit (Ctrl+Bspc / Undo)       R: dead
-//   _RAISE L: dead                          R: page nav
+//   _LOWER L: dead                          R: page nav
+//   _RAISE L: edit (Ctrl+Bspc / Undo)       R: dead
 //   _ADJUST: fall through (TRNS)
 // Directions flipped 2026-06-10: hardware confirmed both encoders rotated
 // backwards, so the two args of every ENCODER_CCW_CW(ccw, cw) are swapped.
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
     [_BASE]   = { ENCODER_CCW_CW(C(KC_RIGHT), C(KC_LEFT)), ENCODER_CCW_CW(MS_WHLU, MS_WHLD) },
-    [_LOWER]  = { ENCODER_CCW_CW(C(KC_Z),     C(KC_BSPC)), ENCODER_CCW_CW(KC_NO,   KC_NO)   },
-    [_RAISE]  = { ENCODER_CCW_CW(KC_NO,       KC_NO),      ENCODER_CCW_CW(KC_PGUP, KC_PGDN) },
+    [_LOWER]  = { ENCODER_CCW_CW(KC_NO,        KC_NO),      ENCODER_CCW_CW(KC_PGUP, KC_PGDN) },
+    [_RAISE]  = { ENCODER_CCW_CW(C(KC_Z),     C(KC_BSPC)), ENCODER_CCW_CW(KC_NO,   KC_NO)   },
     [_ADJUST] = { ENCODER_CCW_CW(KC_TRNS,     KC_TRNS),    ENCODER_CCW_CW(KC_TRNS, KC_TRNS) },
 };
 #endif
