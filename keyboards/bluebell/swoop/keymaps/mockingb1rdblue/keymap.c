@@ -154,8 +154,13 @@ led_config_t g_led_config = {
         // not covering any observed 3x5 position), and QUOT has a real LED (20).
         // Row 4: Y   U   I   O   P
         {  34,  29,  28,  22,  21 },
-        // Row 5: H    J    K    L   QUOT(')
-        {  35,  30,  27,  23,  20 },
+        // Row 5: H    J    K    L   QUOT(NO_LED)
+        // FIX E (2026-06-12): outer pinky-home (' right / A left) has NO working
+        // LED on either half -- both halves drive 17 LEDs, not 18. Same physical
+        // position is dark on both, the signature of a hardware gap (not a map
+        // slip). ' -> NO_LED mirrors left A=NO_LED; index 20 (the dead/absent LED
+        // at that spot) is now unused. H stays 35 (a real LED, confirmed lit).
+        {  35,  30,  27,  23, NO_LED },
         // Row 6: N   M   ,   .   /
         {  32,  31,  26,  24,  19 },
         // Row 7: (NO_LED x2)  WFWD LGUI HOME
