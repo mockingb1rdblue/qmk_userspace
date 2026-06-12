@@ -145,22 +145,19 @@ led_config_t g_led_config = {
         // Row 3: (NO_LED x2)  WBAK CTRL SPC
         { NO_LED, NO_LED,  15,   7,   0 },
         // right half
-        // FIX C (2026-06-12): the press-to-light RIGHT test data was corrupted
-        // (doc flagged m/dot/quot ambiguous); its inversion was self-consistent
-        // but scrambled on hardware -- only LGUI(25) lit correctly. The halves
-        // are mirror-identical PCBs, so the right WS2812 chain is the LEFT chain
-        // mirrored L<->R. This block mirrors the proven-good left map
-        // (Q<->P W<->O E<->I R<->U T<->Y A<->QUOT S<->L D<->K F<->J G<->H
-        //  Z<->SLSH X<->DOT C<->COMM V<->M B<->N WBAK<->WFWD CTRL<->LGUI SPC<->HOME).
-        // Corroboration: this derivation independently yields LGUI=25, the one
-        // right LED confirmed correct on hardware. QUOT is the phantom (mirror
-        // of left's A=NO_LED); right index 35 is the unused phantom position.
+        // FIX D (2026-06-12): direct from hardware press-to-light, full right
+        // capture (operator). The mirror guess (FIX C) had the 3x5 columns
+        // reversed and a wrong phantom. Ground truth: pressing each key lit the
+        // index whose PHYSICAL position is recorded below; new(key)=index under
+        // key. Thumbs HOME(18)/LGUI(25) confirmed correct. The right half drives
+        // ALL 18 LEDs (no phantom): index 35 sits under H (it was the only index
+        // not covering any observed 3x5 position), and QUOT has a real LED (20).
         // Row 4: Y   U   I   O   P
-        {  21,  22,  28,  29,  34 },
-        // Row 5: H    J    K    L   QUOT(NO_LED)
-        {  20,  23,  27,  30, NO_LED },
+        {  34,  29,  28,  22,  21 },
+        // Row 5: H    J    K    L   QUOT(')
+        {  35,  30,  27,  23,  20 },
         // Row 6: N   M   ,   .   /
-        {  19,  24,  26,  31,  32 },
+        {  32,  31,  26,  24,  19 },
         // Row 7: (NO_LED x2)  WFWD LGUI HOME
         { NO_LED, NO_LED,  33,  25,  18 },
     },
@@ -175,15 +172,15 @@ led_config_t g_led_config = {
         {  19,  20 }, {  19,  38 }, {   0,  42 }, {  54,  57 },
         // 16=Q   17=A(phantom)
         {   0,   7 }, {   0,  24 },
-        // Right chain 18-35 (mirror of left chain: x' = 224 - x, y unchanged):
-        // 18=HOME 19=N    20=H    21=Y    22=U    23=J    24=M    25=LGUI
-        { 128,  64 }, { 149,  40 }, { 149,  22 }, { 149,   4 },
-        { 168,   2 }, { 168,  20 }, { 168,  38 }, { 149,  60 },
-        // 26=COMM 27=K    28=I    29=O    30=L    31=DOT  32=SLSH 33=WFWD
-        { 187,  35 }, { 187,  18 }, { 187,   0 }, { 205,   2 },
-        { 205,  20 }, { 205,  38 }, { 224,  42 }, { 170,  57 },
-        // 34=P   35=QUOT(phantom)
-        { 224,   7 }, { 224,  24 },
+        // Right chain 18-35 (true physical position per index, from hardware):
+        // 18=HOME 19=SLSH 20=QUOT 21=P    22=O    23=L    24=DOT  25=LGUI
+        { 128,  64 }, { 224,  42 }, { 224,  24 }, { 224,   7 },
+        { 205,   2 }, { 205,  20 }, { 205,  38 }, { 149,  60 },
+        // 26=COMM 27=K    28=I    29=U    30=J    31=M    32=N    33=WFWD
+        { 187,  35 }, { 187,  18 }, { 187,   0 }, { 168,   2 },
+        { 168,  20 }, { 168,  38 }, { 149,  40 }, { 170,  57 },
+        // 34=Y   35=H
+        { 149,   4 }, { 149,  22 },
     },
     {
         // flags: all per-key
