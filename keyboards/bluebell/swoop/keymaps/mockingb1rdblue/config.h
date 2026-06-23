@@ -4,6 +4,13 @@
 // `qmk flash ... -bl uf2-split-{left,right}`). Matches upstream bluebell/swoop.
 #define EE_HANDS
 
+// Heatmap persistence (heatmap.c): the per-(layer,LED) counts for both windows
+// are saved to the user EEPROM datablock so the map survives sleep/power-down.
+// Must equal sizeof(hm_persist_t): 4 (magic) + 2 * (HM_LAYERS=4 * HM_LEDS=36 *
+// 2 bytes) = 580. A _Static_assert in heatmap.c enforces the match. Fits well
+// inside the RP2040 wear-leveled logical EEPROM (4096 B).
+#define EECONFIG_USER_DATA_SIZE 580
+
 // ===========================================================================
 // Tap/hold: EXACT port of the operator's reviung34 originals (operator request
 // 2026-06-10: "my originals were set perfectly"). The reviung config is a bare

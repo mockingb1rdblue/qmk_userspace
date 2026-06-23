@@ -39,6 +39,8 @@
 #include QMK_KEYBOARD_H
 #include <stdbool.h>
 #include <math.h>
+#include <string.h>
+#include "eeconfig.h"
 
 #define HM_LAYERS    4              // _BASE.._ADJUST
 #define HM_LEDS      RGB_MATRIX_LED_COUNT
@@ -51,7 +53,14 @@
 
 // Idle-animation timing (ms). Anchored to the RGB sleep timeout (60s).
 #define HM_ACTIVE_MS   500
-#define HM_OSC_MS      4000         // SHORT<->LONG oscillation loop period
+// SHORT<->LONG idle oscillation is a TRAPEZOID, not a triangle (operator
+// 2026-06-22): ramp one way over HM_OSC_RAMP_MS, then DWELL at the fully
+// resolved map for HM_OSC_HOLD_MS before reversing -- so each map sits still
+// and readable instead of instantly bouncing back. Full loop period is
+// 2*ramp + 2*hold.
+#define HM_OSC_RAMP_MS 2000         // crossfade ramp, each direction (slow glow)
+#define HM_OSC_HOLD_MS 500          // dwell at each fully-resolved map
+#define HM_OSC_MS      (2 * HM_OSC_RAMP_MS + 2 * HM_OSC_HOLD_MS)
 #define HM_FADEOUT_MS  7000         // pre-sleep fade-to-black window
 
 // Per-(layer, LED) rolling counts for each window.
@@ -71,6 +80,48 @@ static matrix_row_t hm_prev[MATRIX_ROWS];
 // Perceptual gamma LUT + per-LED temporal-dither carry (1/256ths of a level).
 static uint8_t hm_gamma[256];
 static uint8_t hm_carry[HM_LEDS];
+
+// Baked sine (raised-cosine) ease-in-out curve for the SHORT<->LONG ramp:
+// hm_ease[i] = round(255 * (1 - cos(pi * i/255)) / 2), i in 0..255. Velocity is
+// zero at both ends (elongated curve at the extremes) and steepest/most-linear
+// through the middle. Built once at init so the per-frame path stays integer
+// (no cosf on the FPU-less M0+).
+static uint8_t hm_ease[256];
+
+// ---------------------------------------------------------------------------
+// PERSISTENCE (operator 2026-06-22). The rolling counts above are pure RAM, so
+// a power-down wiped the whole heatmap -- and a host SLEEP is exactly that on
+// this bus-powered split: VBUS drops, the MCU loses power, RAM clears. (The RGB
+// *mode* survives sleep only because RGB_MATRIX_SLEEP merely blanks the LEDs
+// while still powered; that is a different, non-power-down case.)
+//
+// Fix: persist the per-(layer,LED) COUNTS for both windows to the wear-leveled
+// user EEPROM datablock and restore on boot. We store counts only (580 B), NOT
+// the 2000-entry ring -- the ring would need an EEPROM resize and far more flash
+// wear. On restore the rings are rebuilt "full" from the counts (sum of counts
+// == live presses <= depth, so it always fits), so the rolling window keeps
+// evicting normally. The rendered map is EXACT at restore and decays naturally
+// afterward; only the precise eviction order of old presses is approximated.
+//
+// Save cadence: on host suspend (suspend_power_down_user -- the sleep path that
+// caused the loss) AND a throttled dirty-save every HM_SAVE_INTERVAL_MS, so an
+// abrupt unplug (no clean suspend, and the slave half has no USB to detect one)
+// loses at most that window. eeconfig_update_user_datablock compares before
+// writing, so an unchanged map costs zero flash cycles.
+#define HM_PERSIST_MAGIC    0x484D0001u  // 'HM' + schema rev 1
+#define HM_SAVE_INTERVAL_MS 300000u      // 5 min throttled dirty-save (unplug guard)
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint16_t s[HM_LAYERS][HM_LEDS];
+    uint16_t l[HM_LAYERS][HM_LEDS];
+} hm_persist_t;
+
+_Static_assert(sizeof(hm_persist_t) == EECONFIG_USER_DATA_SIZE,
+               "EECONFIG_USER_DATA_SIZE (config.h) must equal sizeof(hm_persist_t)");
+
+static bool     hm_dirty     = false;  // counts changed since last save
+static uint32_t hm_last_save = 0;
 
 static void hm_push_ring(uint8_t *ring, uint16_t depth, uint16_t *head,
                          uint16_t *fill, uint16_t (*cnt)[HM_LEDS],
@@ -93,16 +144,76 @@ static void hm_push_ring(uint8_t *ring, uint16_t depth, uint16_t *head,
     if (cnt[layer][led] < depth) cnt[layer][led]++;
 }
 
-void heatmap_record_scan(void) {
-    if (!hm_init) {
-        for (uint16_t i = 0; i < HM_SHORT; i++) hm_ring_s[i] = 0xFF;
-        for (uint16_t i = 0; i < HM_LONG; i++)  hm_ring_l[i] = 0xFF;
-        for (uint16_t i = 0; i < 256; i++) {
-            float x = (float)i / 255.0f;
-            hm_gamma[i] = (uint8_t)lroundf(powf(x, 1.0f / 2.2f) * 255.0f);
-        }
-        hm_init = true;
+// Zero the rings (0xFF = empty) and build the perceptual gamma LUT. Idempotent;
+// runs once, either from heatmap_init() at boot or lazily on the first scan.
+static void hm_lazy_init(void) {
+    for (uint16_t i = 0; i < HM_SHORT; i++) hm_ring_s[i] = 0xFF;
+    for (uint16_t i = 0; i < HM_LONG; i++)  hm_ring_l[i] = 0xFF;
+    for (uint16_t i = 0; i < 256; i++) {
+        float x = (float)i / 255.0f;
+        hm_gamma[i] = (uint8_t)lroundf(powf(x, 1.0f / 2.2f) * 255.0f);
+        // Sine ease-in-out, baked: flat at the ends, linear-ish in the middle.
+        hm_ease[i]  = (uint8_t)lroundf((1.0f - cosf(3.14159265f * x)) * 0.5f * 255.0f);
     }
+    hm_init = true;
+}
+
+// Rebuild a ring "full" from per-(layer,LED) counts so eviction keeps working
+// after a restore. sum(counts) == live presses <= depth, so it always fits.
+static void hm_rebuild_ring(uint8_t *ring, uint16_t depth, uint16_t *head,
+                            uint16_t *fill, uint16_t (*cnt)[HM_LEDS]) {
+    uint16_t idx = 0;
+    for (uint8_t ly = 0; ly < HM_LAYERS && idx < depth; ly++) {
+        for (uint8_t e = 0; e < HM_LEDS && idx < depth; e++) {
+            for (uint16_t n = 0; n < cnt[ly][e] && idx < depth; n++) {
+                ring[idx++] = (uint8_t)((ly << 6) | e);
+            }
+        }
+    }
+    for (uint16_t i = idx; i < depth; i++) ring[i] = 0xFF;
+    *fill = idx;
+    *head = (uint16_t)(idx % depth);
+}
+
+static void hm_persist_save(void) {
+    hm_persist_t blk;
+    blk.magic = HM_PERSIST_MAGIC;
+    memcpy(blk.s, hm_short, sizeof(blk.s));
+    memcpy(blk.l, hm_long,  sizeof(blk.l));
+    eeconfig_update_user_datablock(&blk, 0, sizeof(blk)); // no-op when unchanged
+    hm_dirty     = false;
+    hm_last_save = timer_read32();
+}
+
+static void hm_persist_restore(void) {
+    if (!eeconfig_is_user_datablock_valid()) return;      // fresh/blank EEPROM
+    hm_persist_t blk;
+    eeconfig_read_user_datablock(&blk, 0, sizeof(blk));
+    if (blk.magic != HM_PERSIST_MAGIC) return;            // schema mismatch -> ignore
+    memcpy(hm_short, blk.s, sizeof(blk.s));
+    memcpy(hm_long,  blk.l, sizeof(blk.l));
+    hm_rebuild_ring(hm_ring_s, HM_SHORT, &hm_head_s, &hm_fill_s, hm_short);
+    hm_rebuild_ring(hm_ring_l, HM_LONG,  &hm_head_l, &hm_fill_l, hm_long);
+}
+
+void heatmap_init(void) {
+    if (!hm_init) hm_lazy_init();
+    hm_persist_restore();
+    hm_last_save = timer_read32();
+}
+
+void heatmap_persist_task(void) {
+    if (hm_dirty && timer_elapsed32(hm_last_save) >= HM_SAVE_INTERVAL_MS) {
+        hm_persist_save();
+    }
+}
+
+void heatmap_persist_save_now(void) {
+    if (hm_dirty) hm_persist_save();
+}
+
+void heatmap_record_scan(void) {
+    if (!hm_init) hm_lazy_init();
     uint8_t layer = get_highest_layer(layer_state);
     if (layer >= HM_LAYERS) layer = HM_LAYERS - 1;
 
@@ -117,6 +228,7 @@ void heatmap_record_scan(void) {
             if (led == NO_LED || led >= HM_LEDS) continue;
             hm_push_ring(hm_ring_s, HM_SHORT, &hm_head_s, &hm_fill_s, hm_short, layer, led);
             hm_push_ring(hm_ring_l, HM_LONG,  &hm_head_l, &hm_fill_l, hm_long,  layer, led);
+            hm_dirty = true;  // counts changed -> schedule a persist
         }
     }
 }
@@ -180,11 +292,24 @@ static void hm_idle(uint8_t *mix, uint8_t *fade) {
 
     uint32_t fade_start = (uint32_t)RGB_MATRIX_TIMEOUT - HM_FADEOUT_MS;
     if (since < fade_start) {
-        // Oscillate between the two maps: triangle 0..255..0 over HM_OSC_MS.
+        // Trapezoid over HM_OSC_MS (mix: 0 = SHORT, 255 = LONG). The two ramps
+        // are sine ease-in-out (baked hm_ease LUT): elongated curve at the
+        // extremes, mostly-linear through the middle.
+        //   [0, ramp)            ramp SHORT -> LONG  (eased)
+        //   [ramp, ramp+hold)    DWELL on LONG  (still & readable)
+        //   [ramp+hold, 2ramp+hold) ramp LONG -> SHORT  (eased)
+        //   [2ramp+hold, period) DWELL on SHORT (still & readable)
         uint32_t phase = timer_read32() % HM_OSC_MS;
-        uint32_t half  = HM_OSC_MS / 2;
-        *mix  = phase < half ? (uint8_t)(phase * 255 / half)
-                             : (uint8_t)((HM_OSC_MS - phase) * 255 / half);
+        if (phase < HM_OSC_RAMP_MS) {                              // SHORT -> LONG
+            *mix = hm_ease[phase * 255 / HM_OSC_RAMP_MS];
+        } else if (phase < HM_OSC_RAMP_MS + HM_OSC_HOLD_MS) {      // hold LONG
+            *mix = 255;
+        } else if (phase < 2 * HM_OSC_RAMP_MS + HM_OSC_HOLD_MS) {  // LONG -> SHORT
+            uint32_t into = phase - (HM_OSC_RAMP_MS + HM_OSC_HOLD_MS);
+            *mix = 255 - hm_ease[into * 255 / HM_OSC_RAMP_MS];
+        } else {                                                   // hold SHORT
+            *mix = 0;
+        }
         *fade = 255;
         return;
     }

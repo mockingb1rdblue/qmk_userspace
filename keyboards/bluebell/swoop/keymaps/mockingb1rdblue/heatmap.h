@@ -17,3 +17,12 @@ void heatmap_record_scan(void);
 // Paint LEDs [led_min, led_max) for the active layer's heatmap. Call from the
 // custom RGB Matrix effect each render chunk.
 void heatmap_render(uint8_t led_min, uint8_t led_max);
+
+// Persistence (counts survive power-down/sleep via the wear-leveled user EEPROM
+// datablock; see heatmap.c). Call heatmap_init() once from keyboard_post_init_user
+// (restores the saved map), heatmap_persist_task() from housekeeping_task_user
+// (throttled dirty-save), and heatmap_persist_save_now() from
+// suspend_power_down_user (flush before the host cuts power).
+void heatmap_init(void);
+void heatmap_persist_task(void);
+void heatmap_persist_save_now(void);

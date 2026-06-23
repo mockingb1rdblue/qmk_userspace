@@ -240,6 +240,22 @@ void matrix_slave_scan_user(void) {
 void keyboard_post_init_user(void) {
     rgb_matrix_enable_noeeprom();
     rgb_matrix_mode_noeeprom(RGB_MATRIX_CUSTOM_heatmap_neon);
+    // Restore the persisted per-layer heatmap counts (survives sleep/power-down).
+    heatmap_init();
+}
+
+// Throttled dirty-save of the heatmap; runs on BOTH halves (the slave has no USB
+// to detect a host suspend, so this is its only persist path). Cheap: a no-op
+// unless something changed AND the save interval has elapsed.
+void housekeeping_task_user(void) {
+    heatmap_persist_task();
+}
+
+// Host sleep is a power-down on this bus-powered split -> flush the map before
+// VBUS drops so the heatmap is intact on next boot. Fires on the master (the
+// USB side); the slave is covered by the throttled save above.
+void suspend_power_down_user(void) {
+    heatmap_persist_save_now();
 }
 #endif
 
