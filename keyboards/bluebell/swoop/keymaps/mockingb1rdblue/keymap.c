@@ -35,6 +35,13 @@
 #include QMK_KEYBOARD_H
 #include "keymap_combo.h" // gboards combos, http://combos.gboards.ca/docs/install/
 
+// Dock hot-plug USB re-enumeration watchdog (housekeeping_task_user). ChibiOS/
+// RP2040 only -- pulls in USB_DRIVER + restart_usb_driver(). usb_device_state.h
+// (usb_device_state_get_configure_state) already arrives via QMK_KEYBOARD_H.
+#if defined(PROTOCOL_CHIBIOS)
+#    include "usb_main.h"
+#endif
+
 enum layers {
     _BASE,
     _LOWER,
@@ -249,6 +256,49 @@ void keyboard_post_init_user(void) {
 // unless something changed AND the save interval has elapsed.
 void housekeeping_task_user(void) {
     heatmap_persist_task();
+
+#if defined(PROTOCOL_CHIBIOS)
+    // === Dock hot-plug USB re-enumeration watchdog ==========================
+    // SYMPTOM: detaching/re-attaching the laptop from the Dell dock powers the
+    // board (LEDs come on) but the dock raises VBUS *before* it connects the USB
+    // data lines. The master half asserts its D+ pull-up into a still-dead bus,
+    // the host never sees a connect, and we sit un-enumerated forever -- no
+    // typing until a physical replug.
+    //
+    // Master detection is fine: it's VBUS-based (SPLIT_USB_DETECT is off), and
+    // VBUS is present, so the docked half correctly becomes master. The break is
+    // one layer up, at enumeration: configure_state stalls at *_INIT (powered,
+    // not configured) instead of reaching *_CONFIGURED.
+    //
+    // FIX: on the master, if we stay un-CONFIGURED past a grace window, drop and
+    // re-assert the pull-up (restart_usb_driver == the firmware equivalent of a
+    // replug). By the time the dock finishes wiring data, one of these kicks
+    // lands on a live bus and the host enumerates us. *_SUSPEND (normal host
+    // sleep) is deliberately excluded so sleep/wake is untouched.
+    if (is_keyboard_master()) {
+        static uint32_t usb_wd     = 0;     // last evaluate/kick timestamp
+        static bool     ever_config = false; // have we enumerated since boot?
+
+        switch (usb_device_state_get_configure_state()) {
+            case USB_DEVICE_STATE_CONFIGURED:
+                ever_config = true;          // healthy -- re-arm for next outage
+                usb_wd      = timer_read32();
+                break;
+            case USB_DEVICE_STATE_INIT: {
+                // Fresh boot gets ~3s of grace to enumerate on its own; after a
+                // previously-good link drops, kick faster (~1.5s).
+                uint32_t grace = ever_config ? 1500 : 3000;
+                if (timer_elapsed32(usb_wd) > grace) {
+                    restart_usb_driver(&USB_DRIVER);
+                    usb_wd = timer_read32();
+                }
+                break;
+            }
+            default:                         // *_SUSPEND / *_NO_INIT: leave alone
+                break;
+        }
+    }
+#endif
 }
 
 // Host sleep is a power-down on this bus-powered split -> flush the map before
