@@ -23,9 +23,14 @@
 //     CYAN (~t .63), PURPLE-PINK at t=1 (most used). Unpressed (count 0) -> OFF,
 //     so neglected keys stay obviously dark. NO permanent latch: the map is live
 //     and rolls (a key cools as it leaves the window).
-//   * IDLE (drives WHICH window + a global fade; never distorts hue):
-//       < HM_ACTIVE_MS (500ms)          : ACTIVE -> render the SHORT (rolling-100) map.
-//       500ms .. (TIMEOUT - 7s)         : oscillate (crossfade) SHORT<->LONG, 4s loop.
+//   * IDLE (drives the per-key SHORT<->LONG mix + a global fade; never distorts hue).
+//     Time is measured from the last key-DOWN only (heatmap_last_keydown_elapsed),
+//     so a key RELEASE never restarts the idle clock (operator 2026-06-23):
+//       < HM_ACTIVE_MS (5s)             : ACTIVE -> render the SHORT (rolling-100) map.
+//       5s .. (TIMEOUT - 7s)            : STAGGERED WAVE -- each LED crossfades
+//                                         SHORT<->LONG on the trapezoid, phase-
+//                                         delayed by rank*HM_STAGGER_MS (rank by
+//                                         SHORT usage, hottest first). 11s loop.
 //       last 7s before TIMEOUT          : hold the LONG map and FADE to zero,
 //                                         hitting 0 as RGB_MATRIX_SLEEP cuts LEDs.
 //   * SMOOTHNESS: value goes through a gamma-2.2 LUT (perceptual) plus per-LED
@@ -52,15 +57,25 @@
 #define HM_K         15.0f          // log-curve steepness (Sonar)
 
 // Idle-animation timing (ms). Anchored to the RGB sleep timeout (60s).
-#define HM_ACTIVE_MS   500
+#define HM_ACTIVE_MS   5000         // static SHORT map this long after last press,
+                                    // then the idle wave begins (operator 2026-06-23)
 // SHORT<->LONG idle oscillation is a TRAPEZOID, not a triangle (operator
 // 2026-06-22): ramp one way over HM_OSC_RAMP_MS, then DWELL at the fully
 // resolved map for HM_OSC_HOLD_MS before reversing -- so each map sits still
 // and readable instead of instantly bouncing back. Full loop period is
 // 2*ramp + 2*hold.
-#define HM_OSC_RAMP_MS 2000         // crossfade ramp, each direction (slow glow)
+//
+// STAGGERED WAVE (operator 2026-06-23): the crossfade is no longer global. Each
+// LED runs the SAME trapezoid but with its phase delayed by (rank * HM_STAGGER_MS),
+// where rank is the LED's position in the SHORT-window usage order (hottest =
+// rank 0). So the SHORT<->LONG crossfade sweeps across the keys as a wave led by
+// the most-recently-used keys -- "a rainbow wave, but ordered by heat not
+// position." Each key still fades to its LONG (2000-press) appearance and back,
+// NOT to off. 36 keys * 20ms = 700ms of spread inside the 11s loop.
+#define HM_OSC_RAMP_MS 5000         // crossfade ramp, each direction (5s cos/sin fade)
 #define HM_OSC_HOLD_MS 500          // dwell at each fully-resolved map
 #define HM_OSC_MS      (2 * HM_OSC_RAMP_MS + 2 * HM_OSC_HOLD_MS)
+#define HM_STAGGER_MS  20           // per-rank phase delay of the wave
 #define HM_FADEOUT_MS  7000         // pre-sleep fade-to-black window
 
 // Per-(layer, LED) rolling counts for each window.
@@ -76,6 +91,13 @@ static bool     hm_init = false;
 
 // Previous matrix snapshot for 0->1 edge detection (independent of bongo's).
 static matrix_row_t hm_prev[MATRIX_ROWS];
+
+// Timestamp of the last key-DOWN edge (key presses ONLY; releases never bump it).
+// Both the idle wave (hm_idle) and bongo read this via heatmap_last_keydown_elapsed
+// instead of QMK's last_input_activity_elapsed, which also resets on key-up.
+// At boot it reads ~0ms-elapsed, so the restored map shows bright (ACTIVE) for
+// up to HM_ACTIVE_MS before the idle wave starts -- harmless.
+static uint32_t hm_last_keydown = 0;
 
 // Perceptual gamma LUT + per-LED temporal-dither carry (1/256ths of a level).
 static uint8_t hm_gamma[256];
@@ -222,6 +244,7 @@ void heatmap_record_scan(void) {
         matrix_row_t newly = cur & ~hm_prev[r]; // bits that turned ON this scan
         hm_prev[r]         = cur;
         if (!newly) continue;
+        hm_last_keydown = timer_read32();        // key-DOWN only -> idle/wake clock
         for (uint8_t c = 0; c < MATRIX_COLS; c++) {
             if (!(newly & ((matrix_row_t)1 << c))) continue;
             uint8_t led = g_led_config.matrix_co[r][c];
@@ -231,6 +254,10 @@ void heatmap_record_scan(void) {
             hm_dirty = true;  // counts changed -> schedule a persist
         }
     }
+}
+
+uint32_t heatmap_last_keydown_elapsed(void) {
+    return timer_elapsed32(hm_last_keydown);
 }
 
 static uint8_t hm_lerp(uint8_t a, uint8_t b, uint8_t frac /*0..255*/) {
@@ -283,46 +310,75 @@ static hsv_t hm_color(float t, uint8_t maxv) {
     return (hsv_t){h, s, v};
 }
 
-// Idle state -> (window-mix alpha 0..255 where 0=SHORT,255=LONG) and a global
-// brightness fade 0..255. Active = pure SHORT at full; mid-idle oscillates
-// SHORT<->LONG; last 7s holds LONG and fades to zero.
-static void hm_idle(uint8_t *mix, uint8_t *fade) {
-    uint32_t since = last_input_activity_elapsed();
-    if (since < HM_ACTIVE_MS) { *mix = 0; *fade = 255; return; }
+// Idle regimes (return value), with the window-mix base phase + a global
+// brightness fade as out-params:
+#define HM_REGIME_ACTIVE  0   // pure SHORT, full bright (just typed)
+#define HM_REGIME_WAVE    1   // staggered SHORT<->LONG crossfade (*phase valid)
+#define HM_REGIME_FADE    2   // hold LONG, fading to black before sleep
+#define HM_REGIME_SLEEP   3   // fully faded out
+
+// Trapezoid SHORT<->LONG mix (0 = SHORT, 255 = LONG) for one phase in
+// [0, HM_OSC_MS). Both ramps are sine ease-in-out (baked hm_ease LUT): velocity
+// zero at the ends, near-linear through the middle.
+//   [0, ramp)                ramp SHORT -> LONG  (eased)
+//   [ramp, ramp+hold)        DWELL on LONG  (still & readable)
+//   [ramp+hold, 2ramp+hold)  ramp LONG -> SHORT  (eased)
+//   [2ramp+hold, period)     DWELL on SHORT (still & readable)
+static uint8_t hm_mix_at(uint32_t phase) {
+    if (phase < HM_OSC_RAMP_MS) {
+        return hm_ease[phase * 255 / HM_OSC_RAMP_MS];
+    } else if (phase < HM_OSC_RAMP_MS + HM_OSC_HOLD_MS) {
+        return 255;
+    } else if (phase < 2 * HM_OSC_RAMP_MS + HM_OSC_HOLD_MS) {
+        uint32_t into = phase - (HM_OSC_RAMP_MS + HM_OSC_HOLD_MS);
+        return 255 - hm_ease[into * 255 / HM_OSC_RAMP_MS];
+    }
+    return 0;
+}
+
+// Decide the idle regime from key-DOWN-only elapsed time. For HM_REGIME_WAVE the
+// caller offsets *phase per-LED by rank*HM_STAGGER_MS (see heatmap_render); for
+// the other regimes the mix is uniform (handled by the caller). *fade is the
+// global brightness multiplier (0..255), only < 255 in the pre-sleep fade.
+static uint8_t hm_idle(uint32_t *phase, uint8_t *fade) {
+    uint32_t since = heatmap_last_keydown_elapsed();
+    *fade = 255;
+    if (since < HM_ACTIVE_MS) return HM_REGIME_ACTIVE;
 
     uint32_t fade_start = (uint32_t)RGB_MATRIX_TIMEOUT - HM_FADEOUT_MS;
     if (since < fade_start) {
-        // Trapezoid over HM_OSC_MS (mix: 0 = SHORT, 255 = LONG). The two ramps
-        // are sine ease-in-out (baked hm_ease LUT): elongated curve at the
-        // extremes, mostly-linear through the middle.
-        //   [0, ramp)            ramp SHORT -> LONG  (eased)
-        //   [ramp, ramp+hold)    DWELL on LONG  (still & readable)
-        //   [ramp+hold, 2ramp+hold) ramp LONG -> SHORT  (eased)
-        //   [2ramp+hold, period) DWELL on SHORT (still & readable)
-        uint32_t phase = timer_read32() % HM_OSC_MS;
-        if (phase < HM_OSC_RAMP_MS) {                              // SHORT -> LONG
-            *mix = hm_ease[phase * 255 / HM_OSC_RAMP_MS];
-        } else if (phase < HM_OSC_RAMP_MS + HM_OSC_HOLD_MS) {      // hold LONG
-            *mix = 255;
-        } else if (phase < 2 * HM_OSC_RAMP_MS + HM_OSC_HOLD_MS) {  // LONG -> SHORT
-            uint32_t into = phase - (HM_OSC_RAMP_MS + HM_OSC_HOLD_MS);
-            *mix = 255 - hm_ease[into * 255 / HM_OSC_RAMP_MS];
-        } else {                                                   // hold SHORT
-            *mix = 0;
-        }
-        *fade = 255;
-        return;
+        *phase = timer_read32() % HM_OSC_MS;
+        return HM_REGIME_WAVE;
     }
     if (since < (uint32_t)RGB_MATRIX_TIMEOUT) {       // 7s fade to black on LONG map
         // Branch guard + fade_start def => into in [0, HM_FADEOUT_MS), so
         // into*255/HM_FADEOUT_MS is in [0,254] and fade stays in [1,255]
         // (no unsigned wrap). into*255 max ~1.78e6 fits uint32_t.
         uint32_t into = since - fade_start;
-        *mix  = 255;
         *fade = (uint8_t)(255 - (into * 255 / HM_FADEOUT_MS));
-        return;
+        return HM_REGIME_FADE;
     }
-    *mix = 255; *fade = 0;
+    *fade = 0;
+    return HM_REGIME_SLEEP;
+}
+
+// Per-LED wave-phase offset by SHORT-usage rank, recomputed once per frame.
+// rank 0 = hottest recent key (leads the wave); each colder key lags
+// HM_STAGGER_MS more. Indexed by LED.
+static uint16_t hm_rank_off[HM_LEDS];
+
+// Build hm_rank_off for `layer`: an LED's rank = how many LEDs have a STRICTLY
+// greater SHORT count (ties share a rank). Offset = rank * HM_STAGGER_MS. O(n^2)
+// over <=36 LEDs -- trivial at the ~38Hz render rate.
+static void hm_build_ranks(uint8_t layer) {
+    for (uint8_t i = 0; i < HM_LEDS; i++) {
+        uint16_t ci = hm_short[layer][i];
+        uint16_t rank = 0;
+        for (uint8_t j = 0; j < HM_LEDS; j++) {
+            if (hm_short[layer][j] > ci) rank++;
+        }
+        hm_rank_off[i] = (uint16_t)(rank * HM_STAGGER_MS);
+    }
 }
 
 void heatmap_render(uint8_t led_min, uint8_t led_max) {
@@ -332,8 +388,14 @@ void heatmap_render(uint8_t led_min, uint8_t led_max) {
     uint16_t ds = hm_denom(hm_short, layer, HM_CAP_SHORT);
     uint16_t dl = hm_denom(hm_long,  layer, HM_CAP_LONG);
     uint8_t  maxv = rgb_matrix_get_val();     // respect the brightness knob
-    uint8_t  mix, fade;
-    hm_idle(&mix, &fade);
+    uint32_t phase = 0;
+    uint8_t  fade;
+    uint8_t  regime = hm_idle(&phase, &fade);
+
+    // The wave needs each LED's SHORT-usage rank; rebuild it once per frame
+    // (the effect renders in led_min..led_max chunks -- only the i==led_min<=0
+    // chunk, i.e. the frame's first, recomputes).
+    if (regime == HM_REGIME_WAVE && led_min == 0) hm_build_ranks(layer);
 
     for (uint8_t i = led_min; i < led_max; i++) {
         if (i >= HM_LEDS) continue;
@@ -341,6 +403,17 @@ void heatmap_render(uint8_t led_min, uint8_t led_max) {
         if (cs == 0 && cl == 0) {             // never pressed in either window -> off
             rgb_matrix_set_color(i, 0, 0, 0);
             continue;
+        }
+        // Per-LED SHORT<->LONG mix (0=SHORT, 255=LONG): pure SHORT while active,
+        // the staggered trapezoid wave mid-idle, full LONG during the pre-sleep
+        // fade. The wave delays each LED's phase by its rank offset so the
+        // crossfade sweeps the keys hottest-first.
+        uint8_t mix;
+        if (regime == HM_REGIME_WAVE) {
+            uint32_t kp = (phase + HM_OSC_MS - hm_rank_off[i]) % HM_OSC_MS;
+            mix = hm_mix_at(kp);
+        } else {
+            mix = (regime == HM_REGIME_ACTIVE) ? 0 : 255;
         }
         // Blend the two windows' hotness by the idle mix factor.
         float ts = hm_norm(cs, ds), tl = hm_norm(cl, dl);

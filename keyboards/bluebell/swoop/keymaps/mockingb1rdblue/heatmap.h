@@ -18,6 +18,14 @@ void heatmap_record_scan(void);
 // custom RGB Matrix effect each render chunk.
 void heatmap_render(uint8_t led_min, uint8_t led_max);
 
+// Milliseconds since the last key-DOWN edge (0->1) seen by heatmap_record_scan,
+// on THIS half. Unlike QMK's last_input_activity_elapsed() (which also resets on
+// key-UP / any matrix change), this counts presses ONLY -- releases never reset
+// it. Both the heatmap idle wave and the bongo pacing run off this so neither
+// "wakes" on a key release. Both halves track it independently off the mirrored
+// matrix, so they stay aligned without an explicit split sync.
+uint32_t heatmap_last_keydown_elapsed(void);
+
 // Persistence (counts survive power-down/sleep via the wear-leveled user EEPROM
 // datablock; see heatmap.c). Call heatmap_init() once from keyboard_post_init_user
 // (restores the saved map), heatmap_persist_task() from housekeeping_task_user

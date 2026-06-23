@@ -17,30 +17,31 @@
 //     would leave the slave OLED dead; the mirrored matrix drives both. It also
 //     supersedes the old popcount-INCREASE test, which missed rolls (releasing
 //     one key as you press the next keeps the count flat -> dropped smacks).
-//     Releases never register.
-//   * EVERY key-down smacks again and a held key NEVER blocks it: each smack
-//     holds the paw DOWN for TAP_DOWN_MS then RAISES (back to prep), so a key
-//     pressed while another is still held interrupts with a fresh raise+smack
-//     instead of freezing the paw down. Pre-rev10 the paw stayed down for as
-//     long as any key was physically held.
-//   * idle/prep/sleep pacing uses the whole-keyboard activity timestamp
-//     (SPLIT_ACTIVITY_ENABLE in config.h syncs it to the slave).
+//   * HOLD MODEL (operator 2026-06-23): the paw stays DOWN while a key is
+//     physically held. A new key-down INTERRUPTS with a fresh smack (right wins a
+//     same-scan cross-half tie). A key RELEASE lifts the paw for BONGO_RAISE_MS,
+//     then RE-SMACKS if any key is still held -- so chords/rolls bounce the paw
+//     and a true release settles it back to prep. A TAP_DOWN_MS down-floor keeps
+//     even an ultra-fast tap's smack visible before any lift.
+//   * idle/prep pacing uses the key-DOWN-only clock (heatmap_last_keydown_elapsed),
+//     NOT QMK's last_input_activity (which also resets on key-up), so a release
+//     never re-wakes the cat. Both halves derive it from the mirrored matrix.
 #pragma once
+
+#include "heatmap.h"            // heatmap_last_keydown_elapsed() -- key-DOWN-only clock
 
 #define IDLE_FRAMES 5
 #define TAP_FRAMES 2
 #define ANIM_FRAME_DURATION 200 // ms per idle frame
-#define TAP_DOWN_MS 20          // paw holds DOWN this long per smack, then RAISES
-                                // (even while other keys are held). This is the
-                                // FLOOR, not a tuned value: a full 128x32 frame is
-                                // 512B and at 400kHz I2C1 one push is ~11-12ms, so
-                                // ~20ms is the fastest the panel can show a distinct
-                                // down frame and then a raise. Going lower is
-                                // meaningless -- the down frame wouldn't reliably
-                                // land before the raise overwrites it. (Chosen over
-                                // a dynamic/typing-speed-scaled hold: just peg the
-                                // floor and let every keystroke smack as fast as the
-                                // display can keep up.)
+#define TAP_DOWN_MS 20          // minimum time a smack holds the paw DOWN before a
+                                // release-raise is honored. FLOOR, not tuned: a full
+                                // 128x32 frame is 512B and at 400kHz I2C1 one push is
+                                // ~11-12ms, so ~20ms is the fastest the panel can show
+                                // a distinct down frame. Guarantees even an ultra-fast
+                                // tap shows a smack before the paw lifts.
+#define BONGO_RAISE_MS 20       // on a key RELEASE the paw lifts for this long, then
+                                // re-smacks if any key is still held (operator
+                                // 2026-06-23). Same panel-push floor as TAP_DOWN_MS.
 #define PREP_MS 1000            // paws-up window after the last (global) keystroke
 #define ANIM_SIZE 636           // bytes per frame; the 128x32 buffer clamps at 512
 
@@ -57,7 +58,13 @@ static uint8_t  current_tap_frame  = 0;
 // test missed rolls (release A + press B in one scan keeps the count flat), so
 // fast typing dropped smacks; the per-bit edge catches every individual press.
 static matrix_row_t prev_rows[MATRIX_ROWS] = {0};
-static uint32_t own_tap_timer      = 0;
+// Hold state machine (operator 2026-06-23): the paw stays DOWN while a key is
+// physically held; a new key-down interrupts with a fresh smack; a key RELEASE
+// lifts the paw for BONGO_RAISE_MS then re-smacks if any key is still held.
+static uint32_t bongo_smack_t       = 0;     // last time the paw smacked DOWN
+static uint32_t bongo_raise_t       = 0;     // start of the current release-raise
+static bool     bongo_raising       = false; // in the post-release lift window
+static bool     bongo_pending_relrs = false; // a release latched, awaiting the down-floor
 
 static const char PROGMEM idle[IDLE_FRAMES][ANIM_SIZE] = {{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x40, 0x40, 0x40, 0x20, 0x20, 0x20, 0x20, 0x20, 0x18, 0x04, 0x02, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x20, 0x40, 0x40, 0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0xc1, 0x01, 0x01, 0x02, 0x02, 0x04, 0x04, 0x04, 0x04, 0x02, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x40, 0x80, 0x80, 0x40, 0x00, 0x00, 0x30, 0x30, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x04, 0x04, 0x08, 0x08, 0x10, 0x20, 0x40, 0x80, 0x80, 0x80, 0x80, 0x40, 0x40, 0x40, 0x40, 0x20, 0x20, 0x20, 0x20, 0x10, 0x10, 0x10, 0x10, 0x08, 0x08, 0x08, 0x08, 0x04, 0x04, 0x04, 0x04, 0x02, 0x02, 0x02, 0x02, 0x01, 0x01, 0x01, 0x01,
@@ -115,59 +122,94 @@ static void bongo_draw(const char *frame) {
     }
 }
 
-// Count keys that NEWLY went down (0->1 since last render) on one half, and
-// fold the current matrix into prev_rows for those rows. `start` selects the
-// half: left = rows [0, MATRIX_ROWS/2), right = rows [MATRIX_ROWS/2,
-// MATRIX_ROWS). Thanks to SPLIT_TRANSPORT_MIRROR both halves see the full
-// matrix, so this returns the real per-half key-down edges whether this code
-// runs on the master or the slave -- per keypress, rolls included.
-static uint8_t bongo_half_newpresses(uint8_t start) {
-    uint8_t n = 0;
-    for (uint8_t r = start; r < start + MATRIX_ROWS / 2; r++) {
-        matrix_row_t cur   = matrix_get_row(r);
-        matrix_row_t newly = cur & ~prev_rows[r]; // bits that turned ON
-        prev_rows[r]       = cur;
-        n += __builtin_popcount(newly);
+// Scan the (mirrored) full matrix once: report per-half key-DOWN edges, whether
+// any key was RELEASED this scan, and which halves currently hold keys. Folds
+// the current matrix into prev_rows. Thanks to SPLIT_TRANSPORT_MIRROR both halves
+// see the full matrix, so this is correct on master or slave -- per keypress,
+// rolls included.
+typedef struct {
+    bool down_left, down_right;   // a 0->1 edge on that half this scan
+    bool released;                // any 1->0 edge this scan
+    bool held_left, held_right;   // that half currently has >=1 key down
+} bongo_scan_t;
+
+static bongo_scan_t bongo_scan(void) {
+    bongo_scan_t s = {0};
+    for (uint8_t r = 0; r < MATRIX_ROWS; r++) {
+        matrix_row_t cur  = matrix_get_row(r);
+        matrix_row_t prev = prev_rows[r];
+        prev_rows[r]      = cur;
+        matrix_row_t down = cur & ~prev;   // 0->1 press edges
+        matrix_row_t up   = prev & ~cur;   // 1->0 release edges
+        bool is_left = (r < MATRIX_ROWS / 2);
+        if (down) { if (is_left) s.down_left = true; else s.down_right = true; }
+        if (up)   s.released = true;
+        if (cur)  { if (is_left) s.held_left = true; else s.held_right = true; }
     }
-    return n;
+    return s;
 }
 
 static void render_bongo(void) {
-    uint32_t since = last_input_activity_elapsed();
+    uint32_t     since = heatmap_last_keydown_elapsed(); // key-DOWN only; releases don't wake
+    bongo_scan_t s     = bongo_scan();                   // also re-baselines prev_rows
+    bool         any_held = s.held_left || s.held_right;
+
     if (since > OLED_TIMEOUT) {
-        oled_off();
-        // Re-baseline the snapshot so the wake keystroke isn't double-counted as
-        // a flood of phantom edges (each call folds its half into prev_rows).
-        bongo_half_newpresses(0);
-        bongo_half_newpresses(MATRIX_ROWS / 2);
+        oled_off();   // prev_rows already folded above, so the wake press isn't a flood
         return;
     }
     oled_on();
 
-    // Key-DOWN anywhere: a half had at least one 0->1 edge this scan (per
-    // keypress, rolls included). Releases never register. The struck half picks
-    // the paw, identically on BOTH OLEDs.
-    bool left_down  = bongo_half_newpresses(0) > 0;
-    bool right_down = bongo_half_newpresses(MATRIX_ROWS / 2) > 0;
-
-    if (left_down || right_down) {
-        // Left half -> left paw (tap[0]); right half -> right paw (tap[1]). If
-        // both halves fire in the same scan, the right paw wins (arbitrary
-        // tie-break; simultaneous cross-half key-downs are rare). This fires on
-        // EVERY key-down -- a key pressed while another is still held smacks
-        // again (interrupt), it is NOT blocked by the held key.
-        current_tap_frame = right_down ? 1 : 0;
+    // 1) New key-DOWN -> smack now (interrupt). Left half -> left paw (tap[0]),
+    //    right half -> right paw (tap[1]); right wins a same-scan cross-half tie.
+    //    A press while another key is held re-smacks -- the held key never blocks it.
+    if (s.down_left || s.down_right) {
+        current_tap_frame   = s.down_right ? 1 : 0;
         bongo_draw(tap[current_tap_frame]);
-        own_tap_timer = timer_read32();
+        bongo_smack_t       = timer_read32();
+        bongo_raising       = false;
+        bongo_pending_relrs = false;
         return;
     }
 
-    // Hold the paw DOWN only briefly, then RAISE -- even if keys are still held
-    // (no 'pressed > 0' freeze). After TAP_DOWN_MS the paw lifts to prep, so the
-    // next key-down is a visible raise+smack instead of a stuck-down paw.
-    if (timer_elapsed32(own_tap_timer) < TAP_DOWN_MS) {
+    // 2) Latch a release; it becomes a raise once the down-floor has elapsed so
+    //    even an ultra-fast tap shows its smack first.
+    if (s.released) bongo_pending_relrs = true;
+
+    // 3) Down-floor: keep the paw DOWN for TAP_DOWN_MS after a smack no matter what.
+    if (timer_elapsed32(bongo_smack_t) < TAP_DOWN_MS) {
+        bongo_draw(tap[current_tap_frame]);
         return;
     }
+
+    // 4) Floor passed -> honor a pending release as a brief paw lift.
+    if (bongo_pending_relrs && !bongo_raising) {
+        bongo_pending_relrs = false;
+        bongo_raising       = true;
+        bongo_raise_t       = timer_read32();
+    }
+    if (bongo_raising) {
+        if (timer_elapsed32(bongo_raise_t) < BONGO_RAISE_MS) {
+            bongo_draw(prep[0]);   // paw up
+            return;
+        }
+        bongo_raising = false;
+        if (any_held) {            // re-smack: paw of whichever side still holds
+            current_tap_frame = s.held_right ? 1 : 0;
+            bongo_draw(tap[current_tap_frame]);
+            bongo_smack_t = timer_read32();
+            return;
+        }
+        // else: everything released -> fall through to prep/idle
+    }
+
+    // 5) Keys still held, no edge -> hold the paw DOWN.
+    if (any_held) {
+        bongo_draw(tap[current_tap_frame]);
+        return;
+    }
+
+    // 6) Nothing held: prep window, then the idle loop.
     if (since < PREP_MS) {
         bongo_draw(prep[0]); // paws up, ready
         return;
